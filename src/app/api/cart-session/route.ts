@@ -15,27 +15,18 @@ interface CheckoutItem {
 
 const COLLECTION = "checkoutSessions"
 
-// Funzione robusta per convertire qualsiasi valore in centesimi
-function toCents(value: any): number {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? Math.round(value) : 0
-  }
+// Helper: aggiunge gli header CORS
+function withCors(res: NextResponse) {
+  res.headers.set("Access-Control-Allow-Origin", "*")
+  res.headers.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+  res.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+  return res
+}
 
-  if (typeof value === "string") {
-    const trimmed = value.trim().replace(",", ".")
-    const n = Number(trimmed)
-    if (!Number.isFinite(n)) return 0
-
-    // Se nella stringa c'è un '.', assumiamo che sia in unità (es. 22.30 -> 2230)
-    if (trimmed.includes(".")) {
-      return Math.round(n * 100)
-    }
-
-    // Altrimenti assumiamo che sia già in centesimi (es. "2230")
-    return Math.round(n)
-  }
-
-  return 0
+// Preflight CORS per la chiamata da Shopify
+export async function OPTIONS() {
+  const res = new NextResponse(null, { status: 204 })
+  return withCors(res)
 }
 
 /**
@@ -50,25 +41,26 @@ export async function POST(req: NextRequest) {
     const cart = body.cart
 
     if (!cart || !Array.isArray(cart.items)) {
-      return NextResponse.json(
-        { error: "Carrello non valido" },
-        { status: 400 },
+      return withCors(
+        NextResponse.json(
+          { error: "Carrello non valido" },
+          { status: 400 },
+        ),
       )
     }
 
     const currency = (cart.currency || "EUR").toString().toUpperCase()
 
     let subtotalCents = 0
-
     const items: CheckoutItem[] = cart.items.map((item: any) => {
       const quantity = Number(item.quantity ?? 1)
 
-      // Shopify /cart.js:
-      // - price: prezzo unitario in centesimi (es. 2230)
-      // - line_price: totale riga in centesimi (es. 2230 per qty=1)
-      const priceCents = toCents(item.price)
-      const rawLinePrice = item.line_price ?? priceCents * quantity
-      const linePriceCents = toCents(rawLinePrice)
+      // Shopify /cart.js: price e line_price sono in centesimi (interi)
+      const priceCents = Number(item.price ?? 0)
+      const linePriceCents =
+        typeof item.line_price === "number" && item.line_price > 0
+          ? Number(item.line_price)
+          : priceCents * quantity
 
       subtotalCents += linePriceCents
 
@@ -83,9 +75,9 @@ export async function POST(req: NextRequest) {
       }
     })
 
-    // Fallback: se per qualche motivo subtotalCents è 0 ma Shopify manda total_price
-    if (!subtotalCents && typeof cart.total_price !== "undefined") {
-      subtotalCents = toCents(cart.total_price)
+    // Fallback nel caso improbabile in cui subtotalCents sia 0 ma Shopify manda total_price
+    if (!subtotalCents && typeof cart.total_price === "number") {
+      subtotalCents = Number(cart.total_price)
     }
 
     const sessionId = randomUUID()
@@ -96,27 +88,31 @@ export async function POST(req: NextRequest) {
       items,
       subtotalCents,
       shippingCents: 0,
-      totalCents: subtotalCents, // per ora solo prodotti, senza spedizione
+      totalCents: subtotalCents, // per ora niente spedizione
       rawCart: cart,
       createdAt: new Date().toISOString(),
     })
 
-    return NextResponse.json(
-      {
-        sessionId,
-        currency,
-        items,
-        subtotalCents,
-        shippingCents: 0,
-        totalCents: subtotalCents,
-      },
-      { status: 200 },
+    return withCors(
+      NextResponse.json(
+        {
+          sessionId,
+          currency,
+          items,
+          subtotalCents,
+          shippingCents: 0,
+          totalCents: subtotalCents,
+        },
+        { status: 200 },
+      ),
     )
   } catch (error) {
     console.error("[cart-session POST] errore:", error)
-    return NextResponse.json(
-      { error: "Errore nel salvataggio del carrello" },
-      { status: 500 },
+    return withCors(
+      NextResponse.json(
+        { error: "Errore nel salvataggio del carrello" },
+        { status: 500 },
+      ),
     )
   }
 }
@@ -124,6 +120,7 @@ export async function POST(req: NextRequest) {
 /**
  * GET /api/cart-session?sessionId=...
  * Usato dalla pagina /checkout per recuperare il carrello salvato.
+ * (chiamata SAME-ORIGIN da Vercel → CORS non strettamente necessario, ma non fa male)
  */
 export async function GET(req: NextRequest) {
   try {
@@ -131,18 +128,22 @@ export async function GET(req: NextRequest) {
     const sessionId = searchParams.get("sessionId")
 
     if (!sessionId) {
-      return NextResponse.json(
-        { error: "sessionId mancante" },
-        { status: 400 },
+      return withCors(
+        NextResponse.json(
+          { error: "sessionId mancante" },
+          { status: 400 },
+        ),
       )
     }
 
     const snap = await db.collection(COLLECTION).doc(sessionId).get()
 
     if (!snap.exists) {
-      return NextResponse.json(
-        { error: "Nessun carrello trovato" },
-        { status: 404 },
+      return withCors(
+        NextResponse.json(
+          { error: "Nessun carrello trovato" },
+          { status: 404 },
+        ),
       )
     }
 
@@ -159,22 +160,26 @@ export async function GET(req: NextRequest) {
         ? data.totalCents
         : subtotalCents + shippingCents
 
-    return NextResponse.json(
-      {
-        sessionId,
-        currency,
-        items,
-        subtotalCents,
-        shippingCents,
-        totalCents,
-      },
-      { status: 200 },
+    return withCors(
+      NextResponse.json(
+        {
+          sessionId,
+          currency,
+          items,
+          subtotalCents,
+          shippingCents,
+          totalCents,
+        },
+        { status: 200 },
+      ),
     )
   } catch (error) {
     console.error("[cart-session GET] errore:", error)
-    return NextResponse.json(
-      { error: "Errore nel recupero del carrello" },
-      { status: 500 },
+    return withCors(
+      NextResponse.json(
+        { error: "Errore nel recupero del carrello" },
+        { status: 500 },
+      ),
     )
   }
 }
