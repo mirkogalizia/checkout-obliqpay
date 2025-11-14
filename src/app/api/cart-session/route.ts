@@ -37,7 +37,6 @@ function corsHeaders(origin: string | null) {
   };
 }
 
-// Gestione preflight CORS (importantissimo da Shopify -> Vercel)
 export async function OPTIONS(req: NextRequest) {
   const origin = req.headers.get("origin");
   return new NextResponse(null, {
@@ -45,6 +44,10 @@ export async function OPTIONS(req: NextRequest) {
     headers: corsHeaders(origin),
   });
 }
+
+/* -------------------------------------------------------------------------- */
+/*                                    POST                                     */
+/* -------------------------------------------------------------------------- */
 
 export async function POST(req: NextRequest) {
   try {
@@ -78,7 +81,6 @@ export async function POST(req: NextRequest) {
         }))
       : [];
 
-    // Subtotale in centesimi
     const subtotalFromCart =
       typeof cart.items_subtotal_price === "number"
         ? cart.items_subtotal_price
@@ -146,6 +148,10 @@ export async function POST(req: NextRequest) {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/*                                     GET                                    */
+/* -------------------------------------------------------------------------- */
+
 export async function GET(req: NextRequest) {
   try {
     const origin = req.headers.get("origin");
@@ -182,13 +188,37 @@ export async function GET(req: NextRequest) {
 
     const data = snap.data() || {};
 
-    return new NextResponse(JSON.stringify(data), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/json",
-        ...corsHeaders(origin),
-      },
-    });
+    /* ---------------------------------------------------------------------
+       ADAPTER FIX — TRASFORMA I DATI SALVATI (totals.subtotal)
+       NEL FORMATO CHE IL FRONT-END SI ASPETTA
+       --------------------------------------------------------------------- */
+
+    const subtotalCents = data.totals?.subtotal ?? 0;
+    const currency = data.totals?.currency ?? "EUR";
+
+    const shippingCents = data.shippingCents ?? 0;
+
+    const totalCents =
+      data.totalCents ??
+      subtotalCents + shippingCents;
+
+    return new NextResponse(
+      JSON.stringify({
+        sessionId,
+        items: data.items ?? [],
+        currency,
+        subtotalCents,
+        shippingCents,
+        totalCents,
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders(origin),
+        },
+      }
+    );
   } catch (err) {
     console.error("[cart-session GET] errore:", err);
     return new NextResponse(
