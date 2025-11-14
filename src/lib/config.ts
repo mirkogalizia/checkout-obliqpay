@@ -17,6 +17,9 @@ export interface AppConfig {
   checkoutDomain: string
   shopify: ShopifyConfig
   stripeAccounts: StripeAccount[]
+
+  // 👉 AGGIUNTO
+  defaultCurrency?: string
 }
 
 const CONFIG_COLLECTION = "config"
@@ -24,6 +27,10 @@ const CONFIG_DOC_ID = "global"
 
 const defaultConfig: AppConfig = {
   checkoutDomain: process.env.NEXT_PUBLIC_CHECKOUT_DOMAIN || "",
+
+  // 👉 Default currency
+  defaultCurrency: "eur",
+
   shopify: {
     shopDomain: process.env.SHOPIFY_SHOP_DOMAIN || "",
     adminToken: process.env.SHOPIFY_ADMIN_TOKEN || "",
@@ -49,11 +56,15 @@ export async function getConfig(): Promise<AppConfig> {
 
   return {
     checkoutDomain: data.checkoutDomain || defaultConfig.checkoutDomain,
+
+    defaultCurrency: data.defaultCurrency || defaultConfig.defaultCurrency,
+
     shopify: {
       shopDomain: data.shopify?.shopDomain || defaultConfig.shopify.shopDomain,
       adminToken: data.shopify?.adminToken || defaultConfig.shopify.adminToken,
       apiVersion: data.shopify?.apiVersion || defaultConfig.shopify.apiVersion,
     },
+
     stripeAccounts: (data.stripeAccounts || defaultConfig.stripeAccounts).map(
       (acc: any, idx: number) => ({
         label: acc?.label || `Account ${idx + 1}`,
