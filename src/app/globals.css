@@ -2,10 +2,42 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: light; }
-body { @apply bg-gray-50 text-gray-900; }
+/* Base globale semplice */
+:root {
+  color-scheme: dark light;
+}
 
-.input { @apply block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-base shadow-sm focus:outline-none focus:ring-2 focus:ring-black; }
-.label { @apply text-sm font-medium text-gray-700; }
-.btn-primary { @apply inline-flex items-center justify-center rounded-lg bg-black px-4 py-2 text-white font-medium hover:bg-gray-900 disabled:opacity-50; }
-.card { @apply rounded-2xl bg-white shadow-[0_10px_30px_rgba(0,0,0,0.06)]; }
+html,
+body {
+  padding: 0;
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "SF Pro Display", sans-serif;
+  background: radial-gradient(circle at top left, #020617 0, #020617 38%, #020617 100%);
+  color: #e5e7eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Piccolo helper per card in vetro */
+.glass-card {
+  @apply bg-white/5 border border-white/10 shadow-soft-xl rounded-3xl backdrop-blur-xl;
+}
+
+.glass-input {
+  @apply w-full rounded-2xl bg-white/5 border border-white/10 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-400 focus:border-brand-400;
+}
+
+.glass-label {
+  @apply text-xs uppercase tracking-[0.18em] text-slate-400 mb-1.5 font-medium;
+}
+
+.glass-button {
+  @apply inline-flex items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-semibold bg-white/10 hover:bg-white/15 active:bg-white/20 border border-white/15 text-slate-50 transition-colors;
+}
+
+.glass-button-primary {
+  @apply inline-flex items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-semibold bg-slate-50 text-slate-900 hover:bg-white active:bg-slate-200 shadow-soft-xl border border-white/40 transition;
+}

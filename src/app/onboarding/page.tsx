@@ -1,465 +1,310 @@
-"use client"
+"use client";
 
-import { useEffect, useState } from "react"
+import { useState } from "react";
 
-type StripeAccountForm = {
-  label: string
-  secretKey: string
-  webhookSecret: string
-  active: boolean
-}
+type StripeAccountInput = {
+  label: string;
+  name: string;
+};
 
-type AppConfigForm = {
-  shopifyDomain: string
-  shopifyAdminToken: string
-  shopifyStorefrontToken: string
-  checkoutDomain: string
-  stripeAccounts: StripeAccountForm[]
-}
-
-const EMPTY_STRIPE_ACCOUNTS: StripeAccountForm[] = [
-  { label: "Account 1", secretKey: "", webhookSecret: "", active: true },
-  { label: "Account 2", secretKey: "", webhookSecret: "", active: false },
-  { label: "Account 3", secretKey: "", webhookSecret: "", active: false },
-  { label: "Account 4", secretKey: "", webhookSecret: "", active: false },
-]
+const STRIPE_ACCOUNTS: StripeAccountInput[] = [
+  { label: "Account 1", name: "account1" },
+  { label: "Account 2", name: "account2" },
+  { label: "Account 3", name: "account3" },
+  { label: "Account 4", name: "account4" },
+];
 
 export default function OnboardingPage() {
-  const [form, setForm] = useState<AppConfigForm>({
-    shopifyDomain: "",
-    shopifyAdminToken: "",
-    shopifyStorefrontToken: "",
-    checkoutDomain: "",
-    stripeAccounts: EMPTY_STRIPE_ACCOUNTS,
-  })
+  const [loading, setLoading] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [status, setStatus] = useState<null | { ok: boolean; msg: string }>(
-    null
-  )
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLoading(true);
+    setSaved(false);
+    setError(null);
 
-  useEffect(() => {
-    async function loadConfig() {
-      try {
-        const res = await fetch("/api/config")
-        if (!res.ok) throw new Error("Impossibile caricare la configurazione")
-        const data = await res.json()
+    const formData = new FormData(e.currentTarget);
 
-        setForm({
-          shopifyDomain: data.shopifyDomain || "",
-          shopifyAdminToken: data.shopifyAdminToken || "",
-          shopifyStorefrontToken: data.shopifyStorefrontToken || "",
-          checkoutDomain:
-            data.checkoutDomain || window.location.origin || "",
-          stripeAccounts:
-            (data.stripeAccounts && data.stripeAccounts.length
-              ? data.stripeAccounts
-              : EMPTY_STRIPE_ACCOUNTS
-            ).map((acc: any, idx: number) => ({
-              label: acc.label || `Account ${idx + 1}`,
-              secretKey: acc.secretKey || "",
-              webhookSecret: acc.webhookSecret || "",
-              active: typeof acc.active === "boolean" ? acc.active : idx === 0,
-            })),
-        })
-      } catch (err) {
-        console.error(err)
-        setStatus({
-          ok: false,
-          msg: "Errore nel caricamento della configurazione",
-        })
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadConfig()
-  }, [])
-
-  function updateField<K extends keyof AppConfigForm>(key: K, value: AppConfigForm[K]) {
-    setForm(prev => ({
-      ...prev,
-      [key]: value,
-    }))
-  }
-
-  function updateStripeAccount(
-    index: number,
-    patch: Partial<StripeAccountForm>
-  ) {
-    setForm(prev => {
-      const next = [...prev.stripeAccounts]
-      next[index] = { ...next[index], ...patch }
-      return { ...prev, stripeAccounts: next }
-    })
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setSaving(true)
-    setStatus(null)
+    const payload = {
+      shopifyDomain: formData.get("shopifyDomain") as string,
+      shopifyAdminToken: formData.get("shopifyAdminToken") as string,
+      shopifyStorefrontToken: formData.get("shopifyStorefrontToken") as string,
+      stripeAccounts: STRIPE_ACCOUNTS.map((acc, index) => ({
+        label: formData.get(`${acc.name}-label`) as string,
+        secretKey: formData.get(`${acc.name}-secret`) as string,
+        webhookSecret: formData.get(`${acc.name}-webhook`) as string,
+        active: formData.get(`${acc.name}-active`) === "on",
+        order: index,
+      })),
+      defaultCurrency: (formData.get("defaultCurrency") as string) || "EUR",
+    };
 
     try {
-      const cleaned = {
-        ...form,
-        stripeAccounts: form.stripeAccounts.filter(
-          acc =>
-            acc.secretKey.trim().length > 0 || acc.webhookSecret.trim().length > 0
-        ),
-      }
-
       const res = await fetch("/api/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cleaned),
-      })
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json();
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || "Errore nel salvataggio")
+        throw new Error(json.error || "Errore salvataggio configurazione");
       }
 
-      setStatus({ ok: true, msg: "Configurazione salvata ✅" })
+      setSaved(true);
     } catch (err: any) {
-      console.error(err)
-      setStatus({
-        ok: false,
-        msg: err.message || "Errore nel salvataggio",
-      })
+      setError(err.message ?? "Errore imprevisto");
     } finally {
-      setSaving(false)
+      setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4 py-10">
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-40 -left-24 w-72 h-72 bg-cyan-500/20 rounded-full blur-3xl" />
-        <div className="absolute -bottom-32 right-0 w-80 h-80 bg-purple-500/20 rounded-full blur-3xl" />
-      </div>
-
-      <div className="relative w-full max-w-5xl">
-        {/* Header style Apple/Revolut */}
-        <header className="mb-8 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-50 flex items-center justify-center px-4 py-10">
+      <div className="max-w-6xl w-full space-y-8">
+        {/* Header */}
+        <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-white/5 border border-white/10 mb-3">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs text-slate-300">
-                Setup rapido · Shopify → Stripe
-              </span>
+            <div className="inline-flex items-center gap-2 rounded-full bg-white/5 border border-white/10 px-3 py-1 text-xs text-slate-300 backdrop-blur-md">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Setup iniziale • Checkout Hub
             </div>
-            <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">
-              Checkout Control Center
+            <h1 className="mt-4 text-3xl md:text-4xl font-semibold tracking-tight text-slate-50">
+              Collega Shopify, Stripe e Firebase
             </h1>
-            <p className="mt-2 text-sm text-slate-300 max-w-xl">
-              Collega in pochi passi Shopify, il dominio del checkout e fino a{" "}
-              <span className="font-medium text-slate-100">4 account Stripe</span>.
-              Tutto da un’unica dashboard, stile Apple / Revolut.
+            <p className="mt-2 text-sm text-slate-400 max-w-xl">
+              Configura una sola volta, poi il tuo checkout custom gestirà in automatico
+              carrelli, pagamenti multi-account Stripe e sincronizzazione ordini.
             </p>
           </div>
 
-          <div className="flex flex-col items-start md:items-end gap-2 text-xs text-slate-400">
-            <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-3 py-1">
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-900/60 border border-white/10 text-[10px]">
-                ⛩
-              </span>
-              <span>Ambiente</span>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
-                Live ready
-              </span>
-            </div>
-            <span className="text-[11px]">
-              Ultimo aggiornamento:{" "}
-              <span className="text-slate-200">in tempo reale</span>
-            </span>
+          <div className="glass-card px-4 py-3 flex flex-col gap-1 md:w-72">
+            <p className="text-xs font-medium text-slate-300">
+              Stato onboarding
+            </p>
+            <p className="text-sm text-slate-400">
+              Completa i campi essenziali e salva la configurazione. I dati vengono
+              memorizzati in Firebase e riutilizzati dal backend.
+            </p>
           </div>
         </header>
 
+        {/* Layout principale */}
         <form
           onSubmit={handleSubmit}
-          className="grid gap-6 lg:grid-cols-[2fr,1.3fr]"
+          className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] items-start"
         >
-          {/* Colonna sinistra: Shopify + Checkout */}
+          {/* Colonna sinistra: Shopify + Stripe */}
           <div className="space-y-6">
-            {/* Card Shopify */}
-            <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl p-5 md:p-6 shadow-[0_18px_60px_rgba(15,23,42,0.7)]">
-              <div className="flex items-center justify-between mb-4">
+            {/* Shopify card */}
+            <section className="glass-card p-6 md:p-7 space-y-5">
+              <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-semibold tracking-wide uppercase text-slate-200">
-                    Shopify Store
+                  <p className="glass-label">Sorgente carrelli</p>
+                  <h2 className="text-lg font-semibold text-slate-50 flex items-center gap-2">
+                    Shopify
+                    <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 border border-emerald-500/30">
+                      Live ready
+                    </span>
                   </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Collega il tuo negozio e autorizza l’app a leggere carrelli e
-                    creare ordini “paid / unfulfilled”.
-                  </p>
                 </div>
-                <div className="flex gap-1">
-                  <span className="h-8 w-8 rounded-2xl bg-black/70 border border-white/10 flex items-center justify-center text-[10px]">
-                    🛒
-                  </span>
+                <div className="text-right text-[11px] text-slate-400">
+                  <p>Usa app privata + Storefront API</p>
+                  <p>Scoped solo a ordini & prodotti</p>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-200">
-                    Shopify domain
-                  </label>
-                  <div className="flex items-center gap-2 rounded-2xl bg-black/50 border border-white/10 px-3 py-2.5 focus-within:border-cyan-400/60 focus-within:ring-1 focus-within:ring-cyan-400/40">
-                    <span className="text-[11px] text-slate-400">
-                      https://
-                    </span>
+              <div className="grid gap-4">
+                <div>
+                  <label className="glass-label">Shopify Store Domain</label>
+                  <input
+                    name="shopifyDomain"
+                    className="glass-input"
+                    placeholder="es. imjsqk-my.myshopify.com"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="glass-label">Admin API Token</label>
+                  <input
+                    name="shopifyAdminToken"
+                    type="password"
+                    className="glass-input"
+                    placeholder="shpat_********"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="glass-label">Storefront API Token</label>
+                  <input
+                    name="shopifyStorefrontToken"
+                    type="password"
+                    className="glass-input"
+                    placeholder="Storefront token per leggere il carrello/prodotti"
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="glass-label">Valuta di default</label>
                     <input
-                      type="text"
-                      className="w-full bg-transparent text-sm outline-none placeholder:text-slate-500"
-                      placeholder="notforresale.it o myshop.myshopify.com"
-                      value={form.shopifyDomain}
-                      onChange={e =>
-                        updateField("shopifyDomain", e.target.value)
-                      }
+                      name="defaultCurrency"
+                      className="glass-input"
+                      defaultValue="EUR"
+                      placeholder="EUR"
                     />
                   </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-200">
-                    Admin API Access Token
-                  </label>
-                  <input
-                    type="password"
-                    className="w-full rounded-2xl bg-black/50 border border-white/10 px-3 py-2.5 text-sm outline-none placeholder:text-slate-500 focus:border-cyan-400/60 focus:ring-1 focus:ring-cyan-400/40"
-                    placeholder="shpat_***"
-                    value={form.shopifyAdminToken}
-                    onChange={e =>
-                      updateField("shopifyAdminToken", e.target.value)
-                    }
-                  />
-                  <p className="text-[11px] text-slate-500">
-                    App custom Shopify · permessi: Orders (read), Checkout,
-                    Products.
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-slate-200">
-                    Storefront API Token (optional)
-                  </label>
-                  <input
-                    type="password"
-                    className="w-full rounded-2xl bg-black/50 border border-white/10 px-3 py-2.5 text-sm outline-none placeholder:text-slate-500 focus:border-cyan-400/60 focus:ring-1 focus:ring-cyan-400/40"
-                    placeholder="sf_***"
-                    value={form.shopifyStorefrontToken}
-                    onChange={e =>
-                      updateField("shopifyStorefrontToken", e.target.value)
-                    }
-                  />
-                  <p className="text-[11px] text-slate-500">
-                    Usato se vuoi leggere info prodotto direttamente dalla
-                    Storefront API.
-                  </p>
+                  <div className="text-[11px] text-slate-400 flex items-end">
+                    Usata se il carrello non espone una currency esplicita.
+                  </div>
                 </div>
               </div>
-            </div>
+            </section>
 
-            {/* Card Checkout Domain */}
-            <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl p-5 md:p-6 shadow-[0_18px_60px_rgba(15,23,42,0.7)]">
-              <div className="flex items-center justify-between mb-4">
+            {/* Stripe accounts card */}
+            <section className="glass-card p-6 md:p-7 space-y-4">
+              <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-semibold tracking-wide uppercase text-slate-200">
-                    Checkout Domain
+                  <p className="glass-label">Gateway di pagamento</p>
+                  <h2 className="text-lg font-semibold text-slate-50 flex items-center gap-2">
+                    Stripe multi-account
                   </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Dominio pubblico dell’app (Vercel). Verrà usato per
-                    reindirizzare i carrelli dal tema Shopify.
-                  </p>
                 </div>
-                <span className="h-8 w-8 rounded-2xl bg-black/70 border border-white/10 flex items-center justify-center text-[10px]">
-                  🌐
-                </span>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-200">
-                  URL checkout
-                </label>
-                <input
-                  type="text"
-                  className="w-full rounded-2xl bg-black/50 border border-white/10 px-3 py-2.5 text-sm outline-none placeholder:text-slate-500 focus:border-cyan-400/60 focus:ring-1 focus:ring-cyan-400/40"
-                  placeholder="https://checkout-app.vercel.app"
-                  value={form.checkoutDomain}
-                  onChange={e =>
-                    updateField("checkoutDomain", e.target.value)
-                  }
-                />
-                <p className="text-[11px] text-slate-500">
-                  Deve combaciare con <code className="text-slate-300">NEXT_PUBLIC_CHECKOUT_DOMAIN</code>.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Colonna destra: Stripe multi-account */}
-          <div className="space-y-4">
-            <div className="rounded-3xl border border-white/10 bg-gradient-to-b from-white/10 to-white/[0.03] backdrop-blur-2xl p-5 md:p-6 shadow-[0_18px_60px_rgba(15,23,42,0.9)]">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-sm font-semibold tracking-wide uppercase text-slate-200">
-                    Stripe Routing
-                  </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Aggiungi fino a 4 account Stripe. Il sistema può ruotare le
-                    chiavi e instradare i pagamenti.
-                  </p>
+                <div className="text-right text-[11px] text-slate-400">
+                  <p>Fino a 4 account Stripe</p>
+                  <p>Round-robin sui soli account attivi</p>
                 </div>
-                <span className="h-8 w-8 rounded-2xl bg-black/70 border border-white/10 flex items-center justify-center text-[10px]">
-                  💳
-                </span>
               </div>
 
-              <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
-                {form.stripeAccounts.map((acc, idx) => (
+              <div className="grid gap-4">
+                {STRIPE_ACCOUNTS.map((acc, index) => (
                   <div
-                    key={idx}
-                    className="rounded-2xl border border-white/10 bg-black/40 px-3.5 py-3 space-y-2"
+                    key={acc.name}
+                    className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3"
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <div className="h-7 w-7 rounded-xl bg-slate-900/80 border border-white/10 flex items-center justify-center text-[11px]">
-                          {idx + 1}
-                        </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-200">
+                          {acc.label}
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          Opzionale. Puoi anche usarne solo uno.
+                        </p>
+                      </div>
+                      <label className="inline-flex items-center gap-2 text-[11px] text-slate-300">
                         <input
-                          type="text"
-                          className="bg-transparent text-xs font-medium outline-none placeholder:text-slate-500"
-                          value={acc.label}
-                          onChange={e =>
-                            updateStripeAccount(idx, {
-                              label: e.target.value,
-                            })
-                          }
-                          placeholder={`Account ${idx + 1}`}
+                          type="checkbox"
+                          name={`${acc.name}-active`}
+                          defaultChecked={index === 0}
+                          className="h-3.5 w-3.5 rounded border-white/30 bg-slate-900/60"
+                        />
+                        Attivo
+                      </label>
+                    </div>
+
+                    <div className="grid gap-3">
+                      <div>
+                        <label className="glass-label">Label interna</label>
+                        <input
+                          name={`${acc.name}-label`}
+                          className="glass-input"
+                          placeholder={`es. Stripe NFR ${index + 1}`}
                         />
                       </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          updateStripeAccount(idx, { active: !acc.active })
-                        }
-                        className={`text-[10px] px-2 py-1 rounded-full border ${
-                          acc.active
-                            ? "bg-emerald-500/15 border-emerald-500/50 text-emerald-200"
-                            : "bg-slate-900/70 border-white/10 text-slate-400"
-                        }`}
-                      >
-                        {acc.active ? "Attivo" : "Disattivo"}
-                      </button>
-                    </div>
 
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] text-slate-300">
-                        Secret key
-                      </label>
-                      <input
-                        type="password"
-                        className="w-full rounded-xl bg-slate-950/60 border border-white/10 px-2.5 py-2 text-xs outline-none placeholder:text-slate-500 focus:border-cyan-400/60 focus:ring-1 focus:ring-cyan-400/40"
-                        placeholder="sk_live_***"
-                        value={acc.secretKey}
-                        onChange={e =>
-                          updateStripeAccount(idx, {
-                            secretKey: e.target.value,
-                          })
-                        }
-                      />
-                    </div>
+                      <div>
+                        <label className="glass-label">Secret Key</label>
+                        <input
+                          name={`${acc.name}-secret`}
+                          type="password"
+                          className="glass-input"
+                          placeholder="sk_live_*** o sk_test_***"
+                        />
+                      </div>
 
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] text-slate-300">
-                        Webhook secret
-                      </label>
-                      <input
-                        type="password"
-                        className="w-full rounded-xl bg-slate-950/60 border border-white/10 px-2.5 py-2 text-xs outline-none placeholder:text-slate-500 focus:border-cyan-400/60 focus:ring-1 focus:ring-cyan-400/40"
-                        placeholder="whsec_***"
-                        value={acc.webhookSecret}
-                        onChange={e =>
-                          updateStripeAccount(idx, {
-                            webhookSecret: e.target.value,
-                          })
-                        }
-                      />
+                      <div>
+                        <label className="glass-label">Webhook Secret</label>
+                        <input
+                          name={`${acc.name}-webhook`}
+                          type="password"
+                          className="glass-input"
+                          placeholder="whsec_*** (opzionale ma consigliato)"
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
+            </section>
+          </div>
 
-              {/* Footer card stripe */}
-              <div className="mt-4 flex items-center justify-between gap-3 text-[11px] text-slate-400">
-                <span>
-                  Puoi lasciare vuoti gli account non usati. Verranno ignorati.
+          {/* Colonna destra: Firebase + azioni */}
+          <aside className="space-y-4">
+            {/* Firebase info */}
+            <section className="glass-card p-5 md:p-6 space-y-3">
+              <p className="glass-label">Storage configurazione</p>
+              <h2 className="text-base font-semibold text-slate-50 flex items-center gap-2">
+                Firebase Firestore
+              </h2>
+              <p className="text-sm text-slate-400">
+                I dati inseriti qui vengono salvati su Firestore (collezione tipo
+                <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-black/40 border border-white/5 ml-1">
+                  appConfig
                 </span>
-                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-white/5 border border-white/10">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                  <span>Webhook centralizzato</span>
-                </span>
-              </div>
-            </div>
+                ) e letti dalle API:
+              </p>
+              <ul className="text-[11px] text-slate-400 space-y-1.5">
+                <li>• <code className="font-mono">/api/cart-session</code></li>
+                <li>• <code className="font-mono">/api/payments</code></li>
+                <li>• <code className="font-mono">/api/shopify-cart</code></li>
+                <li>• <code className="font-mono">/api/stripe</code> (webhook)</li>
+              </ul>
+            </section>
 
-            {/* Barra azioni / stato */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-              {status && (
-                <div
-                  className={`text-xs px-3 py-2 rounded-2xl border backdrop-blur-xl ${
-                    status.ok
-                      ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-100"
-                      : "bg-rose-500/10 border-rose-500/40 text-rose-100"
-                  }`}
-                >
-                  {status.msg}
+            {/* Stato + pulsanti */}
+            <section className="glass-card p-5 md:p-6 space-y-4">
+              {error && (
+                <div className="rounded-2xl border border-rose-500/40 bg-rose-950/60 px-3 py-2 text-[11px] text-rose-100">
+                  {error}
+                </div>
+              )}
+              {saved && !error && (
+                <div className="rounded-2xl border border-emerald-500/40 bg-emerald-950/60 px-3 py-2 text-[11px] text-emerald-100">
+                  Configurazione salvata correttamente.
                 </div>
               )}
 
-              <div className="flex items-center gap-2 md:justify-end">
-                <button
-                  type="button"
-                  className="text-xs text-slate-400 hover:text-slate-200 transition"
-                  onClick={() => window.location.assign("/")}
-                >
-                  Annulla
-                </button>
+              <div className="space-y-2">
                 <button
                   type="submit"
-                  disabled={saving || loading}
-                  className="inline-flex items-center gap-2 rounded-2xl px-5 py-2.5 bg-white/10 border border-white/20 backdrop-blur-2xl text-sm font-medium text-slate-50 hover:bg-white/20 disabled:opacity-60 disabled:cursor-not-allowed transition shadow-[0_10px_40px_rgba(15,23,42,0.8)]"
+                  className="glass-button-primary w-full"
+                  disabled={loading}
                 >
-                  {saving ? (
-                    <>
-                      <span className="h-3 w-3 rounded-full border-2 border-white/40 border-t-transparent animate-spin" />
-                      Salvando…
-                    </>
-                  ) : (
-                    <>
-                      <span>Salva configurazione</span>
-                      <span className="text-xs opacity-80">⌘ + S</span>
-                    </>
-                  )}
+                  {loading ? "Salvataggio in corso…" : "Salva configurazione"}
+                </button>
+                <button
+                  type="button"
+                  className="glass-button w-full text-xs"
+                  onClick={() => window.open("/checkout", "_blank")}
+                >
+                  Apri anteprima checkout
                 </button>
               </div>
-            </div>
-          </div>
-        </form>
 
-        {/* Overlay loading iniziale */}
-        {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 backdrop-blur-xl rounded-3xl">
-            <div className="flex flex-col items-center gap-3">
-              <div className="h-8 w-8 rounded-full border-2 border-white/30 border-t-transparent animate-spin" />
-              <span className="text-xs text-slate-300">
-                Caricamento configurazione…
-              </span>
-            </div>
-          </div>
-        )}
+              <p className="text-[11px] text-slate-500">
+                Puoi modificare questi valori in qualsiasi momento. Le nuove config
+                verranno usate dalle prossime sessioni di checkout.
+              </p>
+            </section>
+          </aside>
+        </form>
       </div>
-    </div>
-  )
+    </main>
+  );
 }
