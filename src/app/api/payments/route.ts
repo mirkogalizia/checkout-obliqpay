@@ -1,81 +1,97 @@
+// src/app/api/payments/route.ts
 import { NextRequest, NextResponse } from "next/server"
 import Stripe from "stripe"
-import { getConfig } from "@/lib/config"
 import { db } from "@/lib/firebaseAdmin"
+import { getConfig } from "@/lib/config"
+
+const COLLECTION = "checkoutSessions"
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}))
-    const sessionId: string | undefined = body?.sessionId
+    const body = await req.json()
+    const sessionId = body.sessionId as string | undefined
 
     if (!sessionId) {
       return NextResponse.json(
         { error: "sessionId mancante" },
-        { status: 400 }
+        { status: 400 },
       )
     }
 
-    const cfg = await getConfig()
-    const accounts = cfg.stripeAccounts || []
-    // Per ora: primo account con secretKey impostata
-    const account = accounts.find((a: any) => a.secretKey)
+    // 1) Recupera la sessione carrello da Firestore
+    const snap = await db.collection(COLLECTION).doc(sessionId).get()
 
-    if (!account?.secretKey) {
-      console.error("[payments] Nessun account Stripe con secretKey")
-      return NextResponse.json(
-        { error: "Stripe non configurato" },
-        { status: 500 }
-      )
-    }
-
-    // Leggi la sessione checkout
-    const snap = await db.collection("checkoutSessions").doc(sessionId).get()
     if (!snap.exists) {
       return NextResponse.json(
-        { error: "Sessione checkout non trovata" },
-        { status: 404 }
+        { error: "Nessun carrello trovato per questa sessione" },
+        { status: 404 },
       )
     }
 
-    const data = snap.data() as any
-    const currency = (data.currency || cfg.defaultCurrency || "eur")
-      .toString()
-      .toLowerCase()
+    const data = snap.data() || {}
 
-    const subtotalCents = Number(data.subtotalCents || 0)
-    const totalCentsDoc = Number(data.totalCents || 0)
+    const currency = (data.currency || "EUR").toString().toLowerCase()
 
-    // Se abbiamo totalCents (prodotti + spedizione) > 0, usiamo quello.
-    // Altrimenti fallback al solo subtotale prodotti.
-    const amountCents =
-      totalCentsDoc > 0 ? Math.round(totalCentsDoc) : Math.round(subtotalCents)
+    const subtotalCents =
+      typeof data.subtotalCents === "number" ? data.subtotalCents : 0
+    const shippingCents =
+      typeof data.shippingCents === "number" ? data.shippingCents : 0
 
-    if (!amountCents || amountCents < 50) {
-      console.error("[payments] Importo non valido", {
-        subtotalCents,
-        totalCentsDoc,
-      })
+    const totalCents =
+      typeof data.totalCents === "number"
+        ? data.totalCents
+        : subtotalCents + shippingCents
+
+    if (!totalCents || totalCents < 50) {
+      // Stripe non accetta importi < 0,50
       return NextResponse.json(
-        { error: "Importo non valido (minimo 0,50 €)" },
-        { status: 400 }
+        {
+          error:
+            "Importo non valido. Verifica il totale ordine prima di procedere al pagamento.",
+        },
+        { status: 400 },
       )
     }
 
-    const stripe = new Stripe(account.secretKey)
+    // 2) Recupera config (Stripe + dominio checkout) da Firebase
+    const cfg = await getConfig()
 
+    // Usa il primo account Stripe con secretKey valorizzata,
+    // oppure STRIPE_SECRET_KEY da environment come fallback.
+    const firstStripe =
+      (cfg.stripeAccounts || []).find((a) => a.secretKey) || null
+
+    const secretKey =
+      firstStripe?.secretKey || process.env.STRIPE_SECRET_KEY || ""
+
+    if (!secretKey) {
+      console.error("[/api/payments] Nessuna Stripe secret key configurata")
+      return NextResponse.json(
+        { error: "Configurazione Stripe mancante" },
+        { status: 500 },
+      )
+    }
+
+    // ✅ NIENTE apiVersion qui: usiamo quella di default per evitare errori di tipo
+    const stripe = new Stripe(secretKey)
+
+    // Dominio per redirect success/cancel
     const baseDomain =
+      cfg.checkoutDomain ||
       process.env.NEXT_PUBLIC_CHECKOUT_DOMAIN ||
-      process.env.CHECKOUT_DOMAIN ||
-      "http://localhost:3000"
+      req.headers.get("origin") ||
+      "https://checkout-app-green.vercel.app"
 
     const successUrl = `${baseDomain}/thank-you?sessionId=${encodeURIComponent(
-      sessionId
-    )}`
-    const cancelUrl = `${baseDomain}/checkout?sessionId=${encodeURIComponent(
-      sessionId
-    )}`
+      sessionId,
+    )}&stripeSessionId={CHECKOUT_SESSION_ID}`
 
-    const checkoutSession = await stripe.checkout.sessions.create({
+    const cancelUrl = `${baseDomain}/checkout?sessionId=${encodeURIComponent(
+      sessionId,
+    )}&canceled=1`
+
+    // 3) Crea la Checkout Session Stripe (one line item = totale ordine)
+    const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
       line_items: [
@@ -84,28 +100,30 @@ export async function POST(req: NextRequest) {
             currency,
             product_data: {
               name: "Ordine Not For Resale",
+              description: `Checkout session ${sessionId}`,
             },
-            unit_amount: amountCents,
+            unit_amount: totalCents, // totale in centesimi (già include eventuale spedizione)
           },
           quantity: 1,
         },
       ],
       success_url: successUrl,
       cancel_url: cancelUrl,
-      metadata: {
-        nf_session_id: sessionId,
-      },
     })
 
-    return NextResponse.json({
-      url: checkoutSession.url,
-      id: checkoutSession.id,
-    })
-  } catch (err: any) {
-    console.error("[payments] Stripe error:", err)
+    if (!session.url) {
+      return NextResponse.json(
+        { error: "Impossibile ottenere l'URL di Checkout Stripe" },
+        { status: 500 },
+      )
+    }
+
+    return NextResponse.json({ url: session.url }, { status: 200 })
+  } catch (error: any) {
+    console.error("[/api/payments] errore:", error)
     return NextResponse.json(
-      { error: err?.message || "Errore durante la creazione del pagamento" },
-      { status: 500 }
+      { error: error.message || "Errore interno nel pagamento" },
+      { status: 500 },
     )
   }
 }
