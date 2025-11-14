@@ -1,86 +1,122 @@
 // src/app/api/payments/route.ts
 import { NextRequest, NextResponse } from "next/server"
 import Stripe from "stripe"
-import { getConfig, StripeAccount } from "@/lib/config"
+import { getConfig, AppConfig, StripeAccount } from "@/lib/config"
 
-let rrIndex = -1
-
-function pickStripeAccount(accounts: StripeAccount[]): StripeAccount | null {
-  const usable = accounts.filter((a) => a.secretKey && a.secretKey.trim().length > 10)
-
-  if (!usable.length) return null
-
-  rrIndex = (rrIndex + 1) % usable.length
-  return usable[rrIndex]
+// Per ora: usa il PRIMO account Stripe che ha una secretKey valorizzata
+function pickStripeAccount(cfg: AppConfig): StripeAccount | null {
+  const list = cfg.stripeAccounts || []
+  const withKey = list.filter(
+    (a) => typeof a.secretKey === "string" && a.secretKey.length > 0
+  )
+  return withKey[0] || null
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    let { totalAmount, currency, description } = body
+    const body = await req.json().catch(() => null)
 
-    if (!totalAmount || typeof totalAmount !== "number") {
+    if (!body) {
       return NextResponse.json(
-        { error: "totalAmount (in centesimi) mancante o non valido" },
-        { status: 400 },
+        { error: "Body JSON non valido" },
+        { status: 400 }
       )
     }
 
-    if (totalAmount < 50) {
-      return NextResponse.json({ error: "Importo minimo 0,50 €" }, { status: 400 })
+    const { sessionId, totalAmount, currency } = body as {
+      sessionId?: string
+      totalAmount?: number
+      currency?: string
     }
 
-    currency = (currency || "EUR").toLowerCase()
-    description = description || "Ordine Shopify via checkout custom"
-
-    const cfg = await getConfig()
-    const account = pickStripeAccount(cfg.stripeAccounts)
-
-    if (!account) {
+    if (!sessionId) {
       return NextResponse.json(
-        {
-          error:
-            "Nessun account Stripe configurato. Apri l'onboarding e inserisci almeno una secret key.",
-        },
-        { status: 400 },
+        { error: "sessionId mancante" },
+        { status: 400 }
+      )
+    }
+
+    const amount = Number.isFinite(totalAmount)
+      ? Math.round(totalAmount as number)
+      : 0
+
+    // Stripe richiede importi in centesimi, minimo 50 (0,50 €)
+    if (!amount || amount < 50) {
+      return NextResponse.json(
+        { error: "Importo non valido (minimo 0,50 €)" },
+        { status: 400 }
+      )
+    }
+
+    // 🔐 Config da Firebase
+    const cfg = await getConfig()
+    const account = pickStripeAccount(cfg)
+
+    if (!account || !account.secretKey) {
+      return NextResponse.json(
+        { error: "Nessun account Stripe configurato con secretKey" },
+        { status: 500 }
       )
     }
 
     const stripe = new Stripe(account.secretKey)
 
+    // 👇 niente più cfg.defaultCurrency per non litigare con il tipo
+    const usedCurrency = (currency || "eur").toLowerCase()
+
+    // Dominio per redirect
+    const baseDomain =
+      process.env.NEXT_PUBLIC_CHECKOUT_DOMAIN ||
+      "https://checkout-app-green.vercel.app"
+
+    const successUrl = `${baseDomain}/thank-you?sessionId=${encodeURIComponent(
+      sessionId
+    )}`
+    const cancelUrl = `${baseDomain}/checkout?sessionId=${encodeURIComponent(
+      sessionId
+    )}`
+
+    // 🧾 Checkout Session Stripe (hosted per ora)
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      payment_method_types: ["card"],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: {
+        sessionId,
+        source: "shopify_custom_checkout",
+      },
       line_items: [
         {
-          quantity: 1,
           price_data: {
-            currency,
-            unit_amount: totalAmount,
+            currency: usedCurrency,
+            unit_amount: amount,
             product_data: {
-              name: description,
+              name: `Ordine Shopify ${sessionId}`,
             },
           },
+          quantity: 1,
         },
       ],
-      success_url: cfg.checkoutDomain
-        ? `${cfg.checkoutDomain.replace(/\/$/, "")}/thank-you?session_id={CHECKOUT_SESSION_ID}`
-        : "https://google.com",
-      cancel_url: cfg.checkoutDomain
-        ? `${cfg.checkoutDomain.replace(/\/$/, "")}/cancel?canceled=1`
-        : "https://google.com",
     })
 
     if (!session.url) {
       return NextResponse.json(
-        { error: "Stripe non ha restituito una URL di checkout" },
-        { status: 500 },
+        { error: "Impossibile ottenere l'URL di checkout da Stripe" },
+        { status: 500 }
       )
     }
 
-    return NextResponse.json({ url: session.url })
+    return NextResponse.json(
+      {
+        url: session.url,
+        stripeAccountLabel: account.label ?? "default",
+      },
+      { status: 200 }
+    )
   } catch (err: any) {
-    console.error("[payments] Stripe error:", err)
-    return NextResponse.json({ error: err.message || "Errore Stripe" }, { status: 500 })
+    console.error("[payments] Errore Stripe/Firebase:", err)
+    const message =
+      err?.message || "Errore interno durante la creazione del pagamento"
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
