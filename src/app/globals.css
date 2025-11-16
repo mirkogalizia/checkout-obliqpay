@@ -41,3 +41,24 @@ body {
 .glass-button-primary {
   @apply inline-flex items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-semibold bg-slate-50 text-slate-900 hover:bg-white active:bg-slate-200 shadow-soft-xl border border-white/40 transition;
 }
+
+/* -------------------------------------------------
+   FIX COLORE AMBRATO / GIALLO DI AUTOFILL BROWSER
+-------------------------------------------------- */
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0px 1000px #ffffff inset !important; /* sfondo bianco */
+  box-shadow: 0 0 0px 1000px #ffffff inset !important;
+  -webkit-text-fill-color: #111827 !important; /* testo grigio scuro */
+}
+
+/* (optional) se vuoi togliere il bordo giallo anche sui select / textarea */
+select:-webkit-autofill,
+textarea:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0px 1000px #ffffff inset !important;
+  box-shadow: 0 0 0px 1000px #ffffff inset !important;
+  -webkit-text-fill-color: #111827 !important;
+}
