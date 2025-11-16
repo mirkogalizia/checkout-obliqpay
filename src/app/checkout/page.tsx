@@ -8,7 +8,6 @@ import React, {
   ChangeEvent,
 } from "react"
 import { useSearchParams } from "next/navigation"
-import Link from "next/link"
 import { loadStripe } from "@stripe/stripe-js"
 import {
   Elements,
@@ -124,9 +123,7 @@ function CheckoutPageInner() {
         const sub = Number(data.subtotalCents || 0)
         const ship = Number(data.shippingCents || 0)
         const total =
-          data.totalCents != null
-            ? Number(data.totalCents)
-            : sub + ship
+          data.totalCents != null ? Number(data.totalCents) : sub + ship
 
         setSubtotalCents(sub)
         setShippingCents(ship)
@@ -193,7 +190,7 @@ function CheckoutPageInner() {
     }
   }, [customer, shippingCents, subtotalCents])
 
-  // se cambia il subtotale (es. viene ricalcolato) e la spedizione è già presente, aggiorna il totale
+  // se cambia il subtotale e la spedizione è presente, aggiorna il totale
   useEffect(() => {
     setTotalCents(subtotalCents + shippingCents)
   }, [subtotalCents, shippingCents])
@@ -268,18 +265,20 @@ function CheckoutPageInner() {
 
   return (
     <main className="min-h-screen bg-white text-black px-4 py-6 md:px-6 lg:px-10">
-      {/* HEADER con logo cliccabile verso questo checkout */}
+      {/* HEADER con logo più grande — click = torna al carrello (pagina precedente) */}
       <header className="mb-8 flex flex-col items-center gap-2">
-        <Link
-          href={`/checkout?sessionId=${encodeURIComponent(sessionId)}`}
-          className="inline-flex items-center justify-center"
+        <button
+          type="button"
+          onClick={() => window.history.back()}
+          className="inline-flex items-center justify-center focus:outline-none"
         >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="https://cdn.shopify.com/s/files/1/0899/2188/0330/files/logo_checkify_d8a640c7-98fe-4943-85c6-5d1a633416cf.png?v=1761832152"
             alt="NOT FOR RESALE"
-            className="h-10 md:h-12 w-auto"
+            className="h-14 md:h-16 w-auto"
           />
-        </Link>
+        </button>
       </header>
 
       <div className="mx-auto max-w-6xl grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)]">
@@ -389,7 +388,7 @@ function CheckoutPageInner() {
                   (item.linePriceCents != null ? item.linePriceCents : 0) /
                   100
 
-                // prezzo originale (per mostrare risparmio se scontato)
+                // prezzo originale per calcolare il risparmio se scontato
                 const originalUnit =
                   item.linePriceCents &&
                   item.quantity &&
@@ -423,12 +422,15 @@ function CheckoutPageInner() {
                         </div>
                       )}
                       <div className="mt-1 text-[11px] text-gray-500">
-                        {item.quantity}×{" "}
-                        {unit.toFixed(2)} {currency}
+                        {item.quantity}× {unit.toFixed(2)} {currency}
                       </div>
+
                       {originalUnit && (
                         <div className="mt-0.5 text-[11px] text-emerald-600">
-                          Risparmi {((originalUnit - unit) * item.quantity).toFixed(2)}{" "}
+                          Risparmi{" "}
+                          {(
+                            (originalUnit - unit) * item.quantity
+                          ).toFixed(2)}{" "}
                           {currency}
                         </div>
                       )}
@@ -581,6 +583,8 @@ function PaymentBox({
 
   const options: any = {
     clientSecret,
+    // SOLO carta
+    paymentMethodOrder: ["card"],
     appearance: {
       theme: "flat",
       labels: "floating",
@@ -595,17 +599,32 @@ function PaymentBox({
         ".Block": {
           borderRadius: "10px",
           borderColor: "#111111",
+          borderWidth: "1px",
+          boxShadow: "none",
         },
         ".Input": {
           borderRadius: "10px",
           borderColor: "#111111",
           borderWidth: "1px",
           boxShadow: "none",
+          backgroundColor: "#ffffff",
         },
         ".Input:focus": {
           boxShadow: "0 0 0 1px #000000",
           borderColor: "#000000",
         },
+        ".Tab": {
+          borderRadius: "9999px",
+        },
+      },
+    },
+    // Proviamo a nascondere i campi “facoltativi” dentro il Payment Element
+    fields: {
+      billingDetails: {
+        name: "never",
+        email: "never",
+        phone: "never",
+        address: "never",
       },
     },
   }
@@ -644,10 +663,14 @@ function PaymentBoxInner({
     setError(null)
 
     const fullName =
-      cardholderName.trim() || `${customer.firstName} ${customer.lastName}`.trim()
+      cardholderName.trim() ||
+      `${customer.firstName} ${customer.lastName}`.trim()
 
     try {
-      const { error, paymentIntent } = (await stripe.confirmPayment({
+      const {
+        error,
+        paymentIntent,
+      } = (await stripe.confirmPayment({
         elements,
         confirmParams: {
           payment_method_data: {
@@ -724,6 +747,7 @@ function PaymentBoxInner({
         />
       </div>
 
+      {/* Box PaymentElement con bordi ben visibili */}
       <div className="rounded-2xl border border-black/80 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.08)] px-4 py-5">
         <PaymentElement />
       </div>
