@@ -103,14 +103,16 @@ function CheckoutPageInner() {
               title: it.title,
               variantTitle: it.variantTitle || "",
               quantity: Number(it.quantity || 0),
-              priceCents: Number(it.priceCents || 0),
-              linePriceCents: Number(it.linePriceCents || 0),
+              priceCents: Number(it.priceCents || 0), // prezzo pieno unitario
+              linePriceCents: Number(it.linePriceCents || 0), // totale riga (già scontato)
               image: it.image,
             }))
           : []
 
         const currency = (data.currency || "EUR").toString().toUpperCase()
-        const subCents = Number(data.subtotalCents || data.totals?.subtotal || 0)
+        const subCents = Number(
+          data.subtotalCents || data.totals?.subtotal || 0,
+        )
         const shipCents = Number(data.shippingCents || 0)
         const totCents =
           data.totalCents != null
@@ -166,7 +168,6 @@ function CheckoutPageInner() {
       }
     }
 
-    // lo richiamiamo quando cambia totalCents o sessionId
     if (totalCents > 0) {
       createIntent()
     }
@@ -224,240 +225,303 @@ function CheckoutPageInner() {
     0,
   )
 
+  // risparmio totale su tutto il carrello
+  const totalSavingsCents = items.reduce((sum, it) => {
+    const fullLine = it.priceCents * it.quantity
+    const discount = fullLine - it.linePriceCents
+    return sum + (discount > 0 ? discount : 0)
+  }, 0)
+  const totalSavings = totalSavingsCents / 100
+
   return (
     <main className="min-h-screen bg-white text-black flex items-start justify-center px-4 py-10">
-      <div className="w-full max-w-5xl grid gap-10 md:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)]">
-        {/* COLONNA SINISTRA: DATI CLIENTE / SPEDIZIONE */}
-        <section className="space-y-8">
-          <header>
-            <h1 className="text-2xl font-semibold tracking-tight">
-              Checkout
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Completa i tuoi dati per finalizzare l&apos;ordine.
-            </p>
-          </header>
+      <div className="w-full max-w-5xl">
+        {/* LOGO AL CENTRO IN ALTO */}
+        <div className="flex justify-center mb-8">
+          <img
+            src="https://cdn.shopify.com/s/files/1/0899/2188/0330/files/logo_checkify_d8a640c7-98fe-4943-85c6-5d1a633416cf.png?v=1761832152"
+            alt="Checkify"
+            className="h-10 w-auto"
+          />
+        </div>
 
-          {/* EMAIL */}
-          <div className="space-y-3">
-            <h2 className="text-sm font-medium text-gray-900">
-              Informazioni di contatto
-            </h2>
-            <div className="space-y-2">
-              <label className="block text-xs font-medium text-gray-600">
-                Email
-              </label>
-              <input
-                type="email"
-                value={customer.email}
-                onChange={e => handleCustomerChange("email", e.target.value)}
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-                placeholder="nome@email.com"
-              />
-            </div>
-          </div>
+        <div className="grid gap-10 md:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)]">
+          {/* COLONNA SINISTRA: DATI CLIENTE / SPEDIZIONE */}
+          <section className="space-y-8">
+            <header>
+              <h1 className="text-2xl font-semibold tracking-tight">
+                Checkout
+              </h1>
+              <p className="text-sm text-gray-500 mt-1">
+                Completa i tuoi dati per finalizzare l&apos;ordine.
+              </p>
+            </header>
 
-          {/* INDIRIZZO */}
-          <div className="space-y-4">
-            <h2 className="text-sm font-medium text-gray-900">
-              Indirizzo di spedizione
-            </h2>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-1.5">
+            {/* EMAIL */}
+            <div className="space-y-3">
+              <h2 className="text-sm font-medium text-gray-900">
+                Informazioni di contatto
+              </h2>
+              <div className="space-y-2">
                 <label className="block text-xs font-medium text-gray-600">
-                  Nome
+                  Email
                 </label>
                 <input
-                  value={customer.firstName}
+                  type="email"
+                  value={customer.email}
+                  onChange={e => handleCustomerChange("email", e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
+                  placeholder="nome@email.com"
+                />
+              </div>
+            </div>
+
+            {/* INDIRIZZO */}
+            <div className="space-y-4">
+              <h2 className="text-sm font-medium text-gray-900">
+                Indirizzo di spedizione
+              </h2>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-gray-600">
+                    Nome
+                  </label>
+                  <input
+                    value={customer.firstName}
+                    onChange={e =>
+                      handleCustomerChange("firstName", e.target.value)
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-gray-600">
+                    Cognome
+                  </label>
+                  <input
+                    value={customer.lastName}
+                    onChange={e =>
+                      handleCustomerChange("lastName", e.target.value)
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-gray-600">
+                  Indirizzo
+                </label>
+                <input
+                  value={customer.address1}
                   onChange={e =>
-                    handleCustomerChange("firstName", e.target.value)
+                    handleCustomerChange("address1", e.target.value)
                   }
                   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
                 />
               </div>
+
               <div className="space-y-1.5">
                 <label className="block text-xs font-medium text-gray-600">
-                  Cognome
+                  Dettagli aggiuntivi (opzionale)
                 </label>
                 <input
-                  value={customer.lastName}
+                  value={customer.address2}
                   onChange={e =>
-                    handleCustomerChange("lastName", e.target.value)
+                    handleCustomerChange("address2", e.target.value)
+                  }
+                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
+                  placeholder="Interno, scala, citofono…"
+                />
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-gray-600">
+                    CAP
+                  </label>
+                  <input
+                    value={customer.zip}
+                    onChange={e =>
+                      handleCustomerChange("zip", e.target.value)
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-gray-600">
+                    Città
+                  </label>
+                  <input
+                    value={customer.city}
+                    onChange={e =>
+                      handleCustomerChange("city", e.target.value)
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-gray-600">
+                    Provincia
+                  </label>
+                  <input
+                    value={customer.province}
+                    onChange={e =>
+                      handleCustomerChange("province", e.target.value)
+                    }
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-gray-600">
+                  Paese/Regione
+                </label>
+                <input
+                  value={customer.country}
+                  onChange={e =>
+                    handleCustomerChange("country", e.target.value)
                   }
                   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
                 />
               </div>
-            </div>
 
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-gray-600">
-                Indirizzo
-              </label>
-              <input
-                value={customer.address1}
-                onChange={e =>
-                  handleCustomerChange("address1", e.target.value)
-                }
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-gray-600">
-                Dettagli aggiuntivi (opzionale)
-              </label>
-              <input
-                value={customer.address2}
-                onChange={e =>
-                  handleCustomerChange("address2", e.target.value)
-                }
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-                placeholder="Interno, scala, citofono…"
-              />
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-gray-600">
-                  CAP
-                </label>
-                <input
-                  value={customer.zip}
-                  onChange={e => handleCustomerChange("zip", e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-gray-600">
-                  Città
-                </label>
-                <input
-                  value={customer.city}
-                  onChange={e => handleCustomerChange("city", e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-gray-600">
-                  Provincia
-                </label>
-                <input
-                  value={customer.province}
-                  onChange={e =>
-                    handleCustomerChange("province", e.target.value)
-                  }
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-                />
+              {/* Info spedizione fissa 5,90€ */}
+              <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                Spedizione standard: <strong>5,90 €</strong> in tutta Italia.
+                Il costo è già incluso nel totale ordine.
               </div>
             </div>
+          </section>
 
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-gray-600">
-                Paese/Regione
-              </label>
-              <input
-                value={customer.country}
-                onChange={e =>
-                  handleCustomerChange("country", e.target.value)
-                }
-                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-              />
-            </div>
+          {/* COLONNA DESTRA: RIEPILOGO + PAGAMENTO */}
+          <section className="space-y-6">
+            {/* RIEPILOGO ORDINE */}
+            <div className="border border-gray-200 rounded-2xl p-5 bg-white">
+              <h2 className="text-sm font-medium text-gray-900 mb-4">
+                Riepilogo ordine ({itemsCount})
+              </h2>
 
-            {/* Info spedizione fissa 5,90€ */}
-            <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
-              Spedizione standard: <strong>5,90 €</strong> in tutta Italia.
-              Il costo è già incluso nel totale ordine.
-            </div>
-          </div>
-        </section>
+              <div className="space-y-3 max-h-72 overflow-auto pr-1">
+                {items.map((item, idx) => {
+                  const quantity = item.quantity || 0
+                  const unitOriginal = item.priceCents / 100
+                  const unitDiscounted =
+                    quantity > 0
+                      ? item.linePriceCents / 100 / quantity
+                      : unitOriginal
+                  const fullLine = item.priceCents * quantity
+                  const discountLine = fullLine - item.linePriceCents
+                  const hasDiscount = discountLine > 0
 
-        {/* COLONNA DESTRA: RIEPILOGO + PAGAMENTO */}
-        <section className="space-y-6">
-          {/* RIEPILOGO ORDINE */}
-          <div className="border border-gray-200 rounded-2xl p-5 bg-white">
-            <h2 className="text-sm font-medium text-gray-900 mb-4">
-              Riepilogo ordine ({itemsCount})
-            </h2>
-
-            <div className="space-y-3 max-h-72 overflow-auto pr-1">
-              {items.map((item, idx) => {
-                const unitPrice = item.priceCents / 100
-                const linePrice = item.linePriceCents / 100
-
-                return (
-                  <div
-                    key={idx}
-                    className="flex items-center justify-between gap-3 border-b border-gray-100 pb-3 last:border-b-0 last:pb-0"
-                  >
-                    <div className="flex items-center gap-3">
-                      {item.image && (
-                        <div className="relative h-12 w-12 overflow-hidden rounded-md border border-gray-200 bg-gray-50">
-                          <img
-                            src={item.image}
-                            alt={item.title}
-                            className="h-full w-full object-cover"
-                          />
-                        </div>
-                      )}
-                      <div>
-                        <div className="text-xs font-medium text-gray-900">
-                          {item.title}
-                        </div>
-                        {item.variantTitle && (
-                          <div className="text-[11px] text-gray-500">
-                            {item.variantTitle}
+                  return (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between gap-3 border-b border-gray-100 pb-3 last:border-b-0 last:pb-0"
+                    >
+                      <div className="flex items-center gap-3">
+                        {item.image && (
+                          <div className="relative h-12 w-12 overflow-hidden rounded-md border border-gray-200 bg-gray-50">
+                            <img
+                              src={item.image}
+                              alt={item.title}
+                              className="h-full w-full object-cover"
+                            />
                           </div>
                         )}
-                        <div className="text-[11px] text-gray-500 mt-0.5">
-                          {item.quantity} × {unitPrice.toFixed(2)} {currency}
+                        <div>
+                          <div className="text-xs font-medium text-gray-900">
+                            {item.title}
+                          </div>
+                          {item.variantTitle && (
+                            <div className="text-[11px] text-gray-500">
+                              {item.variantTitle}
+                            </div>
+                          )}
+
+                          {/* Prezzo unitario con sconto / senza sconto */}
+                          <div className="mt-1 text-[11px] text-gray-600">
+                            {quantity} ×{" "}
+                            {hasDiscount ? (
+                              <>
+                                <span className="line-through opacity-60 mr-1">
+                                  {unitOriginal.toFixed(2)} {currency}
+                                </span>
+                                <span className="font-semibold text-green-600">
+                                  {unitDiscounted.toFixed(2)} {currency}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                {unitOriginal.toFixed(2)} {currency}
+                              </>
+                            )}
+                          </div>
+
+                          {hasDiscount && (
+                            <div className="text-[11px] text-green-600 mt-0.5">
+                              Risparmi{" "}
+                              {(discountLine / 100).toFixed(2)} {currency}
+                            </div>
+                          )}
                         </div>
                       </div>
+                      <div className="text-xs font-semibold text-gray-900 text-right">
+                        {(item.linePriceCents / 100).toFixed(2)} {currency}
+                      </div>
                     </div>
-                    <div className="text-xs font-semibold text-gray-900">
-                      {linePrice.toFixed(2)} {currency}
-                    </div>
+                  )
+                })}
+              </div>
+
+              <div className="mt-4 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Subtotale</span>
+                  <span>
+                    {subtotal.toFixed(2)} {currency}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Spedizione</span>
+                  <span>
+                    {shipping.toFixed(2)} {currency}
+                  </span>
+                </div>
+                <div className="border-t border-gray-200 pt-2 flex justify-between text-base">
+                  <span className="font-semibold text-gray-900">Totale</span>
+                  <span className="font-semibold">
+                    {total.toFixed(2)} {currency}
+                  </span>
+                </div>
+
+                {totalSavingsCents > 0 && (
+                  <div className="mt-2 rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-700">
+                    Hai risparmiato{" "}
+                    <strong>
+                      {totalSavings.toFixed(2)} {currency}
+                    </strong>{" "}
+                    con questa promo.
                   </div>
-                )
-              })}
-            </div>
-
-            <div className="mt-4 space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Subtotale</span>
-                <span>
-                  {subtotal.toFixed(2)} {currency}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Spedizione</span>
-                <span>
-                  {shipping.toFixed(2)} {currency}
-                </span>
-              </div>
-              <div className="border-t border-gray-200 pt-2 flex justify-between text-base">
-                <span className="font-semibold text-gray-900">Totale</span>
-                <span className="font-semibold">
-                  {total.toFixed(2)} {currency}
-                </span>
+                )}
               </div>
             </div>
-          </div>
 
-          {/* BOX PAGAMENTO STRIPE */}
-          <div className="border border-gray-200 rounded-2xl p-5 bg-white">
-            <h2 className="text-sm font-medium text-gray-900 mb-3">
-              Pagamento con carta
-            </h2>
-            <PaymentBox
-              clientSecret={clientSecret}
-              sessionId={sessionId}
-              customer={customer}
-              totalFormatted={totalFormatted}
-            />
-          </div>
-        </section>
+            {/* BOX PAGAMENTO STRIPE */}
+            <div className="border border-gray-200 rounded-2xl p-5 bg-white">
+              <h2 className="text-sm font-medium text-gray-900 mb-3">
+                Pagamento con carta
+              </h2>
+              <PaymentBox
+                clientSecret={clientSecret}
+                sessionId={sessionId}
+                customer={customer}
+                totalFormatted={totalFormatted}
+              />
+            </div>
+          </section>
+        </div>
       </div>
     </main>
   )
