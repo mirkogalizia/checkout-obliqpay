@@ -1,42 +1,24 @@
 "use client"
 
-import React, { Suspense, useEffect, useState } from "react"
+import React, { useEffect, useState, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
+import { loadStripe } from "@stripe/stripe-js"
 import {
   Elements,
   PaymentElement,
-  useElements,
   useStripe,
+  useElements,
 } from "@stripe/react-stripe-js"
-import { loadStripe } from "@stripe/stripe-js"
-import type { StripeElementsOptions } from "@stripe/stripe-js"
 
-// ---------------------------------------------
-// STRIPE
-// ---------------------------------------------
 const stripePromise = loadStripe(
-  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY as string,
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || ""
 )
 
-// ---------------------------------------------
-// TIPI
-// ---------------------------------------------
-type CheckoutItem = {
-  id: number | string
-  title: string
-  variantTitle?: string
-  quantity: number
-  priceCents: number
-  linePriceCents: number
-  image?: string
-}
-
 type Customer = {
+  fullName: string
   email: string
-  firstName: string
-  lastName: string
   address1: string
-  address2?: string
+  address2: string
   city: string
   province: string
   zip: string
@@ -44,27 +26,35 @@ type Customer = {
 }
 
 // ---------------------------------------------
-// PAGINA INTERNA (CON useSearchParams)
+// COMPONENTE PRINCIPALE (inner con Suspense)
 // ---------------------------------------------
+
 function CheckoutPageInner() {
   const searchParams = useSearchParams()
-  const sessionId = searchParams.get("sessionId") ?? ""
+  const sessionId = searchParams.get("sessionId") || ""
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [items, setItems] = useState<CheckoutItem[]>([])
+  const [items, setItems] = useState<any[]>([])
   const [currency, setCurrency] = useState("EUR")
-  const [subtotalCents, setSubtotalCents] = useState(0)
-  const [shippingCents, setShippingCents] = useState(0)
-  const [totalCents, setTotalCents] = useState(0)
+
+  const [subtotal, setSubtotal] = useState(0) // €
+  const [shippingAmount, setShippingAmount] = useState(0) // €
+  const [total, setTotal] = useState(0) // €
+
+  const [shippingConfirmed, setShippingConfirmed] = useState(false)
+  const [shippingMethodName, setShippingMethodName] =
+    useState<string | null>(null)
 
   const [clientSecret, setClientSecret] = useState<string | null>(null)
 
-  const [customer, setCustomer] = useState<Customer>({
-    email: "",
+  // dati indirizzo
+  const [address, setAddress] = useState({
     firstName: "",
     lastName: "",
+    email: "",
+    phone: "",
     address1: "",
     address2: "",
     city: "",
@@ -73,11 +63,33 @@ function CheckoutPageInner() {
     country: "IT",
   })
 
-  // ---------------------------------------------
+  function handleAddressChange(
+    field: keyof typeof address,
+    value: string,
+  ) {
+    setAddress(prev => ({
+      ...prev,
+      [field]: value,
+    }))
+  }
+
+  function isAddressComplete(addr: typeof address) {
+    return (
+      addr.firstName.trim() &&
+      addr.lastName.trim() &&
+      addr.email.trim() &&
+      addr.address1.trim() &&
+      addr.city.trim() &&
+      addr.zip.trim() &&
+      addr.country.trim()
+    )
+  }
+
+  // -----------------------------------------
   // CARICA CARRELLO DA /api/cart-session
-  // ---------------------------------------------
+  // -----------------------------------------
   useEffect(() => {
-    async function loadCart() {
+    async function load() {
       if (!sessionId) {
         setError("Nessuna sessione di checkout trovata.")
         setLoading(false)
@@ -97,33 +109,22 @@ function CheckoutPageInner() {
           return
         }
 
-        const itemsData: CheckoutItem[] = Array.isArray(data.items)
-          ? data.items.map((it: any) => ({
-              id: it.id,
-              title: it.title,
-              variantTitle: it.variantTitle || "",
-              quantity: Number(it.quantity || 0),
-              priceCents: Number(it.priceCents || 0), // prezzo pieno unitario
-              linePriceCents: Number(it.linePriceCents || 0), // totale riga (già scontato)
-              image: it.image,
-            }))
-          : []
+        const items = data.items || []
+        const currency = data.currency || "EUR"
+        const subtotalCents = Number(data.subtotalCents || 0)
 
-        const currency = (data.currency || "EUR").toString().toUpperCase()
-        const subCents = Number(
-          data.subtotalCents || data.totals?.subtotal || 0,
-        )
-        const shipCents = Number(data.shippingCents || 0)
-        const totCents =
-          data.totalCents != null
-            ? Number(data.totalCents)
-            : subCents + shipCents
-
-        setItems(itemsData)
+        setItems(items)
         setCurrency(currency)
-        setSubtotalCents(subCents)
-        setShippingCents(shipCents)
-        setTotalCents(totCents)
+
+        const sub = subtotalCents / 100
+        setSubtotal(sub)
+
+        // inizialmente nessuna spedizione applicata
+        setShippingAmount(0)
+        setTotal(sub)
+        setShippingConfirmed(false)
+        setShippingMethodName(null)
+
         setError(null)
       } catch (err) {
         console.error(err)
@@ -133,80 +134,107 @@ function CheckoutPageInner() {
       }
     }
 
-    loadCart()
+    load()
   }, [sessionId])
 
-  // ---------------------------------------------
-  // CREA PAYMENT INTENT SU /api/payment-intent
-  // ---------------------------------------------
+  // -----------------------------------------
+  // APPlica automaticamente 5,90€ quando l’indirizzo è completo
+  // -----------------------------------------
   useEffect(() => {
-    async function createIntent() {
+    const complete = isAddressComplete(address)
+
+    if (complete && !shippingConfirmed) {
+      const shipping = 5.9
+      setShippingAmount(shipping)
+      setShippingMethodName("Spedizione Standard 24/48h")
+      setTotal(subtotal + shipping)
+      setShippingConfirmed(true)
+      setError(null)
+    }
+
+    if (!complete && shippingConfirmed) {
+      // se l’utente cancella qualcosa, togliamo la spedizione
+      setShippingAmount(0)
+      setShippingMethodName(null)
+      setTotal(subtotal)
+      setShippingConfirmed(false)
+    }
+  }, [address, subtotal, shippingConfirmed])
+
+  // -----------------------------------------
+  // CREA PAYMENT INTENT / OTTIENI clientSecret
+  // -----------------------------------------
+  useEffect(() => {
+    async function createPaymentIntent() {
       if (!sessionId) return
-      if (!totalCents) return
+      if (!subtotal) return // niente carrello
 
       try {
         const res = await fetch("/api/payment-intent", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId,
-            customer,
-          }),
+          body: JSON.stringify({ sessionId }),
         })
 
         const data = await res.json()
         if (!res.ok) {
-          console.error("[payment-intent] errore:", data)
-          setError(data.error || "Errore nel preparare il pagamento")
+          console.error("Errore payment-intent:", data)
+          setError(
+            data.error ||
+              "Errore nella preparazione del pagamento.",
+          )
           return
         }
 
-        setClientSecret(data.clientSecret)
+        if (data.clientSecret) {
+          setClientSecret(data.clientSecret)
+        } else {
+          setError(
+            "Risposta pagamento non valida: nessun clientSecret.",
+          )
+        }
       } catch (err) {
         console.error(err)
-        setError("Errore nel preparare il pagamento")
+        setError("Errore nella comunicazione con il server di pagamento.")
       }
     }
 
-    if (totalCents > 0) {
-      createIntent()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId, totalCents])
+    createPaymentIntent()
+  }, [sessionId, subtotal])
 
-  // ---------------------------------------------
-  // HANDLER CAMBIO DATI CUSTOMER
-  // ---------------------------------------------
-  function handleCustomerChange<K extends keyof Customer>(
-    field: K,
-    value: Customer[K],
-  ) {
-    setCustomer(prev => ({
-      ...prev,
-      [field]: value,
-    }))
+  const itemsCount = items.reduce(
+    (acc, it) => acc + Number(it.quantity || 0),
+    0,
+  )
+
+  const customer: Customer = {
+    fullName: `${address.firstName} ${address.lastName}`.trim(),
+    email: address.email,
+    address1: address.address1,
+    address2: address.address2,
+    city: address.city,
+    province: address.province,
+    zip: address.zip,
+    country: address.country || "IT",
   }
 
-  // ---------------------------------------------
-  // UI BASE
-  // ---------------------------------------------
   if (loading) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-white text-black">
-        <p>Caricamento checkout…</p>
+      <main className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50">
+        Caricamento checkout…
       </main>
     )
   }
 
   if (error) {
     return (
-      <main className="min-h-screen flex items-center justify-center bg-white text-black px-4">
-        <div className="border border-red-300 bg-red-50 rounded-xl px-4 py-3 max-w-md w-full text-center">
-          <h1 className="text-base font-semibold mb-1">Errore checkout</h1>
-          <p className="text-sm mb-4">{error}</p>
+      <main className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50">
+        <div className="bg-red-900/40 border border-red-500/60 rounded-2xl px-6 py-4 max-w-md text-center">
+          <h1 className="text-lg font-semibold mb-2">Errore checkout</h1>
+          <p className="text-sm opacity-90 mb-4">{error}</p>
           <a
             href="/"
-            className="inline-flex items-center justify-center rounded-full bg-black text-white px-4 py-2 text-sm"
+            className="px-4 py-2 rounded-full bg-slate-50 text-slate-900 text-sm font-medium"
           >
             Torna allo shop
           </a>
@@ -215,29 +243,13 @@ function CheckoutPageInner() {
     )
   }
 
-  const subtotal = subtotalCents / 100
-  const shipping = shippingCents / 100
-  const total = totalCents / 100
   const totalFormatted = `${total.toFixed(2)} ${currency}`
 
-  const itemsCount = items.reduce(
-    (acc, it) => acc + Number(it.quantity || 0),
-    0,
-  )
-
-  // risparmio totale su tutto il carrello
-  const totalSavingsCents = items.reduce((sum, it) => {
-    const fullLine = it.priceCents * it.quantity
-    const discount = fullLine - it.linePriceCents
-    return sum + (discount > 0 ? discount : 0)
-  }, 0)
-  const totalSavings = totalSavingsCents / 100
-
   return (
-    <main className="min-h-screen bg-white text-black flex items-start justify-center px-4 py-10">
-      <div className="w-full max-w-5xl">
-        {/* LOGO AL CENTRO IN ALTO */}
-        <div className="flex justify-center mb-8">
+    <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4 py-10">
+      <div className="w-full max-w-5xl space-y-8">
+        {/* LOGO CENTRALE */}
+        <div className="flex justify-center">
           <img
             src="https://cdn.shopify.com/s/files/1/0899/2188/0330/files/logo_checkify_d8a640c7-98fe-4943-85c6-5d1a633416cf.png?v=1761832152"
             alt="Checkify"
@@ -245,274 +257,264 @@ function CheckoutPageInner() {
           />
         </div>
 
-        <div className="grid gap-10 md:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)]">
-          {/* COLONNA SINISTRA: DATI CLIENTE / SPEDIZIONE */}
-          <section className="space-y-8">
-            <header>
-              <h1 className="text-2xl font-semibold tracking-tight">
-                Checkout
-              </h1>
-              <p className="text-sm text-gray-500 mt-1">
-                Completa i tuoi dati per finalizzare l&apos;ordine.
+        <div className="grid gap-8 md:grid-cols-[minmax(0,2.1fr)_minmax(0,1.2fr)]">
+          {/* COLONNA SINISTRA */}
+          <section className="bg-slate-900/70 border border-slate-700/60 rounded-3xl p-6 md:p-8 backdrop-blur-xl shadow-xl">
+            <header className="mb-6">
+              <h1 className="text-2xl font-semibold">Checkout</h1>
+              <p className="text-sm text-slate-300 mt-1">
+                Completa i dati di spedizione e paga in modo sicuro.
               </p>
             </header>
 
-            {/* EMAIL */}
-            <div className="space-y-3">
-              <h2 className="text-sm font-medium text-gray-900">
-                Informazioni di contatto
-              </h2>
-              <div className="space-y-2">
-                <label className="block text-xs font-medium text-gray-600">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={customer.email}
-                  onChange={e => handleCustomerChange("email", e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-                  placeholder="nome@email.com"
-                />
-              </div>
-            </div>
-
-            {/* INDIRIZZO */}
-            <div className="space-y-4">
-              <h2 className="text-sm font-medium text-gray-900">
-                Indirizzo di spedizione
+            {/* DATI SPEDIZIONE */}
+            <div className="space-y-4 mb-8">
+              <h2 className="text-sm font-semibold uppercase text-slate-200">
+                Dati di spedizione
               </h2>
 
               <div className="grid gap-3 md:grid-cols-2">
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-medium text-gray-600">
-                    Nome
-                  </label>
-                  <input
-                    value={customer.firstName}
-                    onChange={e =>
-                      handleCustomerChange("firstName", e.target.value)
-                    }
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-medium text-gray-600">
-                    Cognome
-                  </label>
-                  <input
-                    value={customer.lastName}
-                    onChange={e =>
-                      handleCustomerChange("lastName", e.target.value)
-                    }
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-gray-600">
-                  Indirizzo
-                </label>
                 <input
-                  value={customer.address1}
+                  className="input"
+                  placeholder="Nome"
+                  value={address.firstName}
                   onChange={e =>
-                    handleCustomerChange("address1", e.target.value)
+                    handleAddressChange("firstName", e.target.value)
                   }
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
+                />
+                <input
+                  className="input"
+                  placeholder="Cognome"
+                  value={address.lastName}
+                  onChange={e =>
+                    handleAddressChange("lastName", e.target.value)
+                  }
                 />
               </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-gray-600">
-                  Dettagli aggiuntivi (opzionale)
-                </label>
-                <input
-                  value={customer.address2}
-                  onChange={e =>
-                    handleCustomerChange("address2", e.target.value)
-                  }
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-                  placeholder="Interno, scala, citofono…"
-                />
-              </div>
+              <input
+                className="input"
+                placeholder="Email"
+                type="email"
+                value={address.email}
+                onChange={e =>
+                  handleAddressChange("email", e.target.value)
+                }
+              />
+
+              <input
+                className="input"
+                placeholder="Telefono (opzionale)"
+                value={address.phone}
+                onChange={e =>
+                  handleAddressChange("phone", e.target.value)
+                }
+              />
+
+              <input
+                className="input"
+                placeholder="Indirizzo"
+                value={address.address1}
+                onChange={e =>
+                  handleAddressChange("address1", e.target.value)
+                }
+              />
+
+              <input
+                className="input"
+                placeholder="Interno, scala, citofono (opzionale)"
+                value={address.address2}
+                onChange={e =>
+                  handleAddressChange("address2", e.target.value)
+                }
+              />
 
               <div className="grid gap-3 md:grid-cols-3">
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-medium text-gray-600">
-                    CAP
-                  </label>
-                  <input
-                    value={customer.zip}
-                    onChange={e =>
-                      handleCustomerChange("zip", e.target.value)
-                    }
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-medium text-gray-600">
-                    Città
-                  </label>
-                  <input
-                    value={customer.city}
-                    onChange={e =>
-                      handleCustomerChange("city", e.target.value)
-                    }
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-medium text-gray-600">
-                    Provincia
-                  </label>
-                  <input
-                    value={customer.province}
-                    onChange={e =>
-                      handleCustomerChange("province", e.target.value)
-                    }
-                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-gray-600">
-                  Paese/Regione
-                </label>
                 <input
-                  value={customer.country}
+                  className="input"
+                  placeholder="CAP"
+                  value={address.zip}
                   onChange={e =>
-                    handleCustomerChange("country", e.target.value)
+                    handleAddressChange("zip", e.target.value)
                   }
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-black focus:ring-2 focus:ring-black/10"
+                />
+                <input
+                  className="input"
+                  placeholder="Città"
+                  value={address.city}
+                  onChange={e =>
+                    handleAddressChange("city", e.target.value)
+                  }
+                />
+                <input
+                  className="input"
+                  placeholder="Provincia"
+                  value={address.province}
+                  onChange={e =>
+                    handleAddressChange("province", e.target.value)
+                  }
                 />
               </div>
 
-              {/* Info spedizione fissa 5,90€ */}
-              <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
-                Spedizione standard: <strong>5,90 €</strong> in tutta Italia.
-                Il costo è già incluso nel totale ordine.
-              </div>
+              <input
+                className="input"
+                placeholder="Paese"
+                value={address.country}
+                onChange={e =>
+                  handleAddressChange("country", e.target.value)
+                }
+              />
+
+              <p className="text-[11px] text-slate-400 mt-1">
+                La spedizione verrà calcolata automaticamente dopo aver
+                inserito tutti i dati di spedizione.
+              </p>
+            </div>
+
+            {/* ARTICOLI */}
+            <div className="space-y-4">
+              <h2 className="text-sm font-semibold uppercase text-slate-200 flex items-center justify-between">
+                <span>Articoli nel carrello</span>
+                <span className="text-xs text-slate-400">
+                  ({itemsCount})
+                </span>
+              </h2>
+
+              {items.map((item, idx) => {
+                const qty = Number(item.quantity || 1)
+                const rawLineCents =
+                  item.linePriceCents ??
+                  item.line_price ??
+                  item.linePrice ??
+                  0
+                const rawPriceCents =
+                  item.priceCents ?? item.price ?? 0
+
+                const unitPrice = rawPriceCents / 100
+                const linePrice = rawLineCents / 100
+                const effectiveUnit =
+                  qty > 0 ? linePrice / qty : unitPrice
+
+                const hasDiscount = effectiveUnit < unitPrice - 0.001
+                const savingPerUnit = unitPrice - effectiveUnit
+                const savingTotal = savingPerUnit * qty
+
+                return (
+                  <div
+                    key={idx}
+                    className="flex gap-3 p-3 bg-slate-900/40 border border-slate-800 rounded-2xl"
+                  >
+                    {item.image && (
+                      <div className="h-16 w-16 flex-shrink-0 overflow-hidden rounded-xl bg-slate-800">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={item.image}
+                          alt={item.title}
+                          className="h-full w-full object-cover"
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex-1 flex justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-medium">
+                          {item.title}
+                        </div>
+                        {item.variantTitle && (
+                          <div className="text-xs text-slate-400">
+                            {item.variantTitle}
+                          </div>
+                        )}
+                        <div className="text-xs text-slate-400 mt-1">
+                          {qty}×{" "}
+                          {hasDiscount ? (
+                            <>
+                              <span className="line-through opacity-60 mr-1">
+                                {unitPrice.toFixed(2)} {currency}
+                              </span>
+                              <span>
+                                {effectiveUnit.toFixed(2)} {currency}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              {unitPrice.toFixed(2)} {currency}
+                            </>
+                          )}
+                        </div>
+                        {hasDiscount && savingTotal > 0 && (
+                          <div className="text-[11px] text-emerald-400 mt-1">
+                            Risparmi{" "}
+                            {savingTotal.toFixed(2)} {currency}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="text-sm font-semibold text-slate-50">
+                        {linePrice.toFixed(2)} {currency}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </section>
 
-          {/* COLONNA DESTRA: RIEPILOGO + PAGAMENTO */}
-          <section className="space-y-6">
-            {/* RIEPILOGO ORDINE */}
-            <div className="border border-gray-200 rounded-2xl p-5 bg-white">
-              <h2 className="text-sm font-medium text-gray-900 mb-4">
-                Riepilogo ordine ({itemsCount})
+          {/* COLONNA DESTRA – TOT + PAGAMENTO */}
+          <section className="bg-slate-900/80 border border-slate-700/70 rounded-3xl p-6 md:p-8 backdrop-blur-xl shadow-xl flex flex-col gap-6">
+            <div>
+              <h2 className="text-sm font-semibold uppercase text-slate-200 mb-4">
+                Totale ordine
               </h2>
 
-              <div className="space-y-3 max-h-72 overflow-auto pr-1">
-                {items.map((item, idx) => {
-                  const quantity = item.quantity || 0
-                  const unitOriginal = item.priceCents / 100
-                  const unitDiscounted =
-                    quantity > 0
-                      ? item.linePriceCents / 100 / quantity
-                      : unitOriginal
-                  const fullLine = item.priceCents * quantity
-                  const discountLine = fullLine - item.linePriceCents
-                  const hasDiscount = discountLine > 0
-
-                  return (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between gap-3 border-b border-gray-100 pb-3 last:border-b-0 last:pb-0"
-                    >
-                      <div className="flex items-center gap-3">
-                        {item.image && (
-                          <div className="relative h-12 w-12 overflow-hidden rounded-md border border-gray-200 bg-gray-50">
-                            <img
-                              src={item.image}
-                              alt={item.title}
-                              className="h-full w-full object-cover"
-                            />
-                          </div>
-                        )}
-                        <div>
-                          <div className="text-xs font-medium text-gray-900">
-                            {item.title}
-                          </div>
-                          {item.variantTitle && (
-                            <div className="text-[11px] text-gray-500">
-                              {item.variantTitle}
-                            </div>
-                          )}
-
-                          {/* Prezzo unitario con sconto / senza sconto */}
-                          <div className="mt-1 text-[11px] text-gray-600">
-                            {quantity} ×{" "}
-                            {hasDiscount ? (
-                              <>
-                                <span className="line-through opacity-60 mr-1">
-                                  {unitOriginal.toFixed(2)} {currency}
-                                </span>
-                                <span className="font-semibold text-green-600">
-                                  {unitDiscounted.toFixed(2)} {currency}
-                                </span>
-                              </>
-                            ) : (
-                              <>
-                                {unitOriginal.toFixed(2)} {currency}
-                              </>
-                            )}
-                          </div>
-
-                          {hasDiscount && (
-                            <div className="text-[11px] text-green-600 mt-0.5">
-                              Risparmi{" "}
-                              {(discountLine / 100).toFixed(2)} {currency}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="text-xs font-semibold text-gray-900 text-right">
-                        {(item.linePriceCents / 100).toFixed(2)} {currency}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-
-              <div className="mt-4 space-y-2 text-sm">
+              <div className="space-y-3 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Subtotale</span>
+                  <span className="text-slate-300">Subtotale</span>
                   <span>
                     {subtotal.toFixed(2)} {currency}
                   </span>
                 </div>
+
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Spedizione</span>
-                  <span>
-                    {shipping.toFixed(2)} {currency}
-                  </span>
+                  <span className="text-slate-300">Spedizione</span>
+                  {shippingConfirmed ? (
+                    <span>
+                      {shippingAmount.toFixed(2)} {currency}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-400">
+                      Inserisci l&apos;indirizzo per calcolare
+                    </span>
+                  )}
                 </div>
-                <div className="border-t border-gray-200 pt-2 flex justify-between text-base">
-                  <span className="font-semibold text-gray-900">Totale</span>
-                  <span className="font-semibold">
+
+                {shippingConfirmed && (
+                  <div className="mt-1 rounded-2xl border border-slate-700 bg-slate-900/70 px-3 py-2 text-xs">
+                    <div className="font-semibold text-slate-100">
+                      {shippingMethodName}
+                    </div>
+                    <div className="text-slate-400">
+                      Consegna stimata in 24/48h in tutta Italia.
+                    </div>
+                  </div>
+                )}
+
+                <div className="border-t border-slate-700 pt-3 flex justify-between text-base">
+                  <span className="font-semibold text-slate-100">
+                    Totale
+                  </span>
+                  <span className="font-semibold text-lg">
                     {total.toFixed(2)} {currency}
                   </span>
                 </div>
-
-                {totalSavingsCents > 0 && (
-                  <div className="mt-2 rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-xs text-green-700">
-                    Hai risparmiato{" "}
-                    <strong>
-                      {totalSavings.toFixed(2)} {currency}
-                    </strong>{" "}
-                    con questa promo.
-                  </div>
-                )}
               </div>
             </div>
 
             {/* BOX PAGAMENTO STRIPE */}
-            <div className="border border-gray-200 rounded-2xl p-5 bg-white">
-              <h2 className="text-sm font-medium text-gray-900 mb-3">
+            <div className="mt-2">
+              <h3 className="text-sm font-semibold mb-2">
                 Pagamento con carta
-              </h2>
+              </h3>
               <PaymentBox
                 clientSecret={clientSecret}
                 sessionId={sessionId}
@@ -550,7 +552,7 @@ function PaymentBox({
     )
   }
 
-  const options: StripeElementsOptions = {
+  const options: any = {
     clientSecret,
     appearance: {
       theme: "flat",
@@ -561,29 +563,6 @@ function PaymentBox({
         colorText: "#111111",
         colorDanger: "#df1c41",
         borderRadius: "8px",
-        fontFamily:
-          'system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif',
-      },
-      rules: {
-        ".Input, .Block": {
-          backgroundColor: "rgba(255,255,255,1)",
-          border: "1.5px solid #111111",
-          boxShadow: "0 0 0 0 rgba(0,0,0,0)",
-          padding: "10px 12px",
-        },
-        ".Input--focus, .Block--focus": {
-          border: "1.5px solid #000000",
-          boxShadow: "0 0 0 1px #000000",
-        },
-        ".Input--invalid, .Block--invalid": {
-          borderColor: "#df1c41",
-          boxShadow: "0 0 0 1px rgba(223,28,65,0.3)",
-        },
-        ".Label": {
-          fontSize: "13px",
-          fontWeight: "500",
-          color: "#111111",
-        },
       },
     },
   }
@@ -611,11 +590,7 @@ function PaymentBoxInner({
   const stripe = useStripe()
   const elements = useElements()
 
-  const defaultName = `${customer.firstName ?? ""} ${
-    customer.lastName ?? ""
-  }`.trim()
-
-  const [cardholderName, setCardholderName] = useState(defaultName)
+  const [cardholderName, setCardholderName] = useState("")
   const [paying, setPaying] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -625,10 +600,11 @@ function PaymentBoxInner({
     setPaying(true)
     setError(null)
 
-    const fullName = cardholderName.trim() || defaultName || ""
+    const fullName =
+      cardholderName.trim() || customer.fullName.trim() || ""
 
     try {
-      const { error, paymentIntent } = await stripe.confirmPayment({
+      const { error, paymentIntent } = (await stripe.confirmPayment({
         elements,
         confirmParams: {
           payment_method_data: {
@@ -647,7 +623,7 @@ function PaymentBoxInner({
           },
         },
         redirect: "if_required",
-      } as any)
+      } as any)) as any
 
       if (error) {
         console.error(error)
@@ -689,31 +665,26 @@ function PaymentBoxInner({
 
   return (
     <div className="space-y-4">
-      {/* Nome intestatario prima del box carta */}
+      {/* Nome intestatario sopra al box carta */}
       <div>
-        <label className="block text-xs font-medium text-gray-700 mb-1.5">
+        <label className="block text-xs font-medium text-gray-200 mb-1.5">
           Nome completo sull&apos;intestatario della carta
         </label>
         <input
           type="text"
           value={cardholderName}
           onChange={e => setCardholderName(e.target.value)}
-          className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-black focus:ring-2 focus:ring-black"
+          className="w-full rounded-xl border border-slate-600 bg-slate-900/60 px-3 py-2 text-sm text-slate-50 outline-none focus:border-white focus:ring-2 focus:ring-white/60"
           placeholder="Es. Mario Rossi"
         />
       </div>
 
-      {/* Box carta con bordi neri ben visibili */}
-      <div className="rounded-2xl border border-black/80 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.08)] px-4 py-5">
-        <PaymentElement
-          options={{
-            layout: "tabs",
-          }}
-        />
+      <div className="rounded-2xl border border-slate-600 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.18)] px-4 py-5">
+        <PaymentElement />
       </div>
 
       {error && (
-        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+        <div className="text-xs text-red-400 bg-red-950/40 border border-red-700 rounded-md px-3 py-2">
           {error}
         </div>
       )}
@@ -721,11 +692,11 @@ function PaymentBoxInner({
       <button
         onClick={handlePay}
         disabled={paying || !stripe || !elements}
-        className="w-full inline-flex items-center justify-center rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white hover:bg-gray-900 disabled:opacity-60"
+        className="w-full inline-flex items-center justify-center rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black hover:bg-slate-100 disabled:opacity-60"
       >
         {paying ? "Elaborazione…" : `Paga ora ${totalFormatted}`}
       </button>
-      <p className="text-[11px] text-gray-500">
+      <p className="text-[11px] text-slate-400">
         I pagamenti sono elaborati in modo sicuro da Stripe. I dati
         della carta non passano mai sui nostri server.
       </p>
@@ -733,9 +704,17 @@ function PaymentBoxInner({
   )
 }
 
-// ---------------------------------------------
-// EXPORT DI DEFAULT RICHIESTO DA NEXT
-// ---------------------------------------------
+// ------------------------------------------------------
+// STILI INPUT (riuso in tutta la pagina)
+// ------------------------------------------------------
+const inputBase =
+  "bg-slate-900/60 border border-slate-700/80 rounded-2xl px-3 py-2 text-sm text-slate-50 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-white/40"
+
+Object.assign(globalThis as any, {
+  input: inputBase,
+})
+
+// wrapper con Suspense (Next)
 export default function CheckoutPage() {
   return (
     <Suspense fallback={<div>Caricamento checkout…</div>}>
