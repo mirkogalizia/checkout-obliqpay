@@ -45,7 +45,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // 1) Recupera la sessione carrello da Firestore
     const snap = await db.collection(COLLECTION).doc(sessionId).get()
 
     if (!snap.exists) {
@@ -56,20 +55,11 @@ export async function POST(req: NextRequest) {
     }
 
     const data: any = snap.data() || {}
-
-    // Se abbiamo già un PaymentIntent salvato, riusa quello
-    if (data.paymentIntentClientSecret) {
-      return NextResponse.json(
-        { clientSecret: data.paymentIntentClientSecret },
-        { status: 200 },
-      )
-    }
-
     const currency = (data.currency || "EUR").toString().toLowerCase()
 
-    // ---------------------------------------------------
-    // 2) Dati cliente SOLO dal body (form checkout)
-    // ---------------------------------------------------
+    // Se esiste già un PaymentIntent, aggiornalo invece di crearne uno nuovo
+    const existingPaymentIntentId = data.paymentIntentId as string | undefined
+
     const fullNameRaw =
       customerBody.fullName ||
       `${customerBody.firstName || ""} ${customerBody.lastName || ""}`
@@ -78,8 +68,7 @@ export async function POST(req: NextRequest) {
     const email = (customerBody.email || "").trim()
     const phone = (customerBody.phone || "").trim()
 
-    const address1 =
-      customerBody.address1 || customerBody.address2 || "" // address2 lo usiamo solo come fallback
+    const address1 = customerBody.address1 || customerBody.address2 || ""
     const address2 = customerBody.address2 || ""
     const city = customerBody.city || ""
     const postalCode = customerBody.postalCode || ""
@@ -104,9 +93,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ---------------------------------------------------
-    // 3) Config Stripe da Firebase (merchantSite, label, ecc.)
-    // ---------------------------------------------------
     const cfg = await getConfig()
 
     const stripeAccounts = Array.isArray(cfg.stripeAccounts)
@@ -155,44 +141,87 @@ export async function POST(req: NextRequest) {
     }
     const description = descriptionParts.join(" | ")
 
-    // ---------------------------------------------------
-    // 4) Crea il PaymentIntent con amountCents passato dal frontend
-    // ---------------------------------------------------
-    const params: Stripe.PaymentIntentCreateParams = {
-      amount: amountCents,
-      currency,
-      payment_method_types: ["card"],
+    let paymentIntent: Stripe.PaymentIntent
 
-      metadata: {
-        sessionId,
-        merchant_site: merchantSite,
-        customer_email: email || "",
-        customer_name: fullName || "",
-        first_item_title: firstItemTitle,
-      },
+    if (existingPaymentIntentId) {
+      // AGGIORNA il PaymentIntent esistente
+      const updateParams: Stripe.PaymentIntentUpdateParams = {
+        amount: amountCents,
+        metadata: {
+          sessionId,
+          merchant_site: merchantSite,
+          customer_email: email || "",
+          customer_name: fullName || "",
+          first_item_title: firstItemTitle,
+        },
+      }
 
-      statement_descriptor_suffix: statementDescriptorSuffix,
+      if (shipping) {
+        updateParams.shipping = shipping
+      }
+
+      if (email) {
+        updateParams.receipt_email = email
+      }
+
+      if (description) {
+        updateParams.description = description
+      }
+
+      paymentIntent = await stripe.paymentIntents.update(
+        existingPaymentIntentId,
+        updateParams,
+      )
+
+      console.log(
+        `[/api/payment-intent] Aggiornato PaymentIntent ${existingPaymentIntentId} con amount ${amountCents}`,
+      )
+    } else {
+      // CREA nuovo PaymentIntent
+      const params: Stripe.PaymentIntentCreateParams = {
+        amount: amountCents,
+        currency,
+        payment_method_types: ["card"],
+
+        metadata: {
+          sessionId,
+          merchant_site: merchantSite,
+          customer_email: email || "",
+          customer_name: fullName || "",
+          first_item_title: firstItemTitle,
+        },
+
+        statement_descriptor_suffix: statementDescriptorSuffix,
+      }
+
+      if (shipping) {
+        params.shipping = shipping
+      }
+
+      if (email) {
+        params.receipt_email = email
+      }
+
+      if (description) {
+        params.description = description
+      }
+
+      paymentIntent = await stripe.paymentIntents.create(params)
+
+      console.log(
+        `[/api/payment-intent] Creato nuovo PaymentIntent ${paymentIntent.id} con amount ${amountCents}`,
+      )
+
+      // Salva il PaymentIntent ID in Firestore
+      await db.collection(COLLECTION).doc(sessionId).update({
+        paymentIntentId: paymentIntent.id,
+        paymentIntentClientSecret: paymentIntent.client_secret,
+        stripeAccountLabel: firstStripe?.label || null,
+      })
     }
 
-    if (shipping) {
-      params.shipping = shipping
-    }
-
-    if (email) {
-      params.receipt_email = email
-    }
-
-    if (description) {
-      params.description = description
-    }
-
-    const paymentIntent = await stripe.paymentIntents.create(params)
-
-    // 5) Salva info del PaymentIntent + cliente in Firestore
+    // Salva i dati cliente aggiornati
     await db.collection(COLLECTION).doc(sessionId).update({
-      paymentIntentId: paymentIntent.id,
-      paymentIntentClientSecret: paymentIntent.client_secret,
-      stripeAccountLabel: firstStripe?.label || null,
       customer: {
         fullName,
         email,
