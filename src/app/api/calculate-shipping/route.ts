@@ -39,63 +39,68 @@ export async function POST(req: NextRequest) {
       hasRawCart: !!data.rawCart,
       hasRawCartItems: !!data.rawCart?.items,
       rawCartItemsCount: data.rawCart?.items?.length,
-      hasItems: !!data.items,
-      itemsCount: data.items?.length,
     })
 
-    // ESTRAI GLI ITEMS DAL CARRELLO
     let cartItems: any[] = []
 
-    // Il tuo carrello ha rawCart.items come array diretto
     if (Array.isArray(data.rawCart?.items) && data.rawCart.items.length > 0) {
       cartItems = data.rawCart.items
-      console.log("[calculate-shipping] Usando rawCart.items (array diretto)")
-    }
-    // Fallback: usa items array top-level
-    else if (Array.isArray(data.items) && data.items.length > 0) {
+      console.log("[calculate-shipping] Usando rawCart.items")
+    } else if (Array.isArray(data.items) && data.items.length > 0) {
       cartItems = data.items
-      console.log("[calculate-shipping] Usando items array (top-level)")
+      console.log("[calculate-shipping] Usando items array")
     }
 
     if (cartItems.length === 0) {
-      console.error("[calculate-shipping] Nessun item trovato nel carrello")
+      console.error("[calculate-shipping] Nessun item trovato")
       return NextResponse.json({ error: "Carrello vuoto" }, { status: 400 })
     }
 
-    console.log(`[calculate-shipping] Trovati ${cartItems.length} items nel carrello`)
-
     const cfg = await getConfig()
     const shopifyDomain = cfg.shopify.shopDomain
-    const storefrontToken = cfg.shopify.storefrontToken
+    const adminToken = cfg.shopify.adminToken
 
-    if (!shopifyDomain || !storefrontToken) {
+    if (!shopifyDomain || !adminToken) {
       console.error("[calculate-shipping] Config Shopify mancante")
       return NextResponse.json({ error: "Configurazione Shopify mancante" }, { status: 500 })
     }
 
-    console.log(`[calculate-shipping] Calcolo spedizione per ${destination.city}, ${destination.countryCode}`)
+    console.log(`[calculate-shipping] Calcolo per ${destination.city}, ${destination.countryCode}`)
 
-    const shippingRates = await getShopifyShippingRates({
+    const shippingRates = await calculateShippingWithAdmin({
       shopifyDomain,
-      storefrontToken,
-      cartItems, // Passa gli items diretti
+      adminToken,
+      cartItems,
       destination,
     })
 
     if (!shippingRates || shippingRates.length === 0) {
       console.warn("[calculate-shipping] Nessuna tariffa trovata")
-      return NextResponse.json(
-        { error: "Nessuna tariffa di spedizione disponibile per questa destinazione" },
-        { status: 404 }
-      )
+      
+      // Fallback: usa tariffa fissa
+      const fallbackShippingCents = getFallbackShipping(destination.countryCode)
+      
+      await db.collection(COLLECTION).doc(sessionId).update({
+        shippingCents: fallbackShippingCents,
+        shippingDestination: destination,
+        shippingCalculatedAt: new Date().toISOString(),
+        shippingMethod: "Spedizione Standard (fallback)",
+      })
+
+      return NextResponse.json({
+        shippingCents: fallbackShippingCents,
+        destination,
+        method: "Spedizione Standard (fallback)",
+        currency: "EUR",
+      })
     }
 
-    shippingRates.sort((a: any, b: any) => parseFloat(a.price.amount) - parseFloat(b.price.amount))
+    shippingRates.sort((a: any, b: any) => parseFloat(a.price) - parseFloat(b.price))
 
     const selectedRate = shippingRates[0]
-    const shippingCents = Math.round(parseFloat(selectedRate.price.amount) * 100)
+    const shippingCents = Math.round(parseFloat(selectedRate.price) * 100)
 
-    console.log(`[calculate-shipping] ✅ Tariffa: ${selectedRate.title} = €${(shippingCents / 100).toFixed(2)}`)
+    console.log(`[calculate-shipping] ✅ ${selectedRate.title} = €${(shippingCents / 100).toFixed(2)}`)
 
     await db.collection(COLLECTION).doc(sessionId).update({
       shippingCents,
@@ -106,8 +111,8 @@ export async function POST(req: NextRequest) {
       availableShippingRates: shippingRates.map((rate: any) => ({
         title: rate.title,
         handle: rate.handle,
-        priceCents: Math.round(parseFloat(rate.price.amount) * 100),
-        currency: rate.price.currencyCode,
+        priceCents: Math.round(parseFloat(rate.price) * 100),
+        currency: "EUR",
       })),
     })
 
@@ -116,12 +121,12 @@ export async function POST(req: NextRequest) {
       destination,
       method: selectedRate.title,
       handle: selectedRate.handle,
-      currency: selectedRate.price.currencyCode,
+      currency: "EUR",
       availableRates: shippingRates.map((rate: any) => ({
         title: rate.title,
         handle: rate.handle,
-        priceCents: Math.round(parseFloat(rate.price.amount) * 100),
-        currency: rate.price.currencyCode,
+        priceCents: Math.round(parseFloat(rate.price) * 100),
+        currency: "EUR",
       })),
     })
   } catch (error: any) {
@@ -133,155 +138,164 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function getShopifyShippingRates({
+// Calcola spedizione usando Shopify Admin API
+async function calculateShippingWithAdmin({
   shopifyDomain,
-  storefrontToken,
+  adminToken,
   cartItems,
   destination,
 }: {
   shopifyDomain: string
-  storefrontToken: string
+  adminToken: string
   cartItems: any[]
   destination: Destination
 }) {
   try {
-    // Converti items nel formato GraphQL lineItems
+    // Prepara line items per draft order
     const lineItems = cartItems.map((item: any) => {
-      // Il tuo carrello ha variant_id come numero
       const variantId = item.variant_id || item.id
-
+      
       if (!variantId) {
-        console.error("[getShopifyShippingRates] Item senza variant_id:", item)
+        console.error("[calculateShippingWithAdmin] Item senza variant_id:", item)
         return null
       }
 
-      // Converti in formato GID se necessario
-      let gid = variantId
-      if (typeof variantId === "number" || !variantId.toString().startsWith("gid://")) {
-        gid = `gid://shopify/ProductVariant/${variantId}`
+      // Rimuovi prefisso gid:// se presente
+      let cleanVariantId = variantId
+      if (typeof variantId === "string" && variantId.startsWith("gid://")) {
+        cleanVariantId = variantId.split("/").pop()
       }
-
-      const quantity = item.quantity || 1
-
-      console.log("[getShopifyShippingRates] Line item:", { gid, quantity })
 
       return {
-        variantId: gid,
-        quantity,
+        variant_id: cleanVariantId,
+        quantity: item.quantity || 1,
       }
-    }).filter(Boolean) // Rimuovi eventuali null
+    }).filter(Boolean)
 
     if (lineItems.length === 0) {
-      throw new Error("Nessun variantId valido trovato negli items")
+      throw new Error("Nessun line item valido")
     }
 
-    console.log(`[getShopifyShippingRates] Creazione checkout con ${lineItems.length} prodotti`)
+    console.log(`[calculateShippingWithAdmin] Creazione draft order per calcolare spedizione`)
 
-    const mutation = `
-      mutation checkoutCreate($input: CheckoutCreateInput!) {
-        checkoutCreate(input: $input) {
-          checkout {
-            id
-            webUrl
-            availableShippingRates {
-              ready
-              shippingRates {
-                handle
-                title
-                priceV2 {
-                  amount
-                  currencyCode
-                }
-              }
-            }
-          }
-          checkoutUserErrors {
-            message
-            field
-            code
-          }
-        }
-      }
-    `
-
-    const variables = {
-      input: {
-        lineItems,
-        shippingAddress: {
+    // Crea un draft order temporaneo
+    const draftOrderPayload = {
+      draft_order: {
+        line_items: lineItems,
+        shipping_address: {
           address1: " ",
           city: destination.city || " ",
           province: destination.province || undefined,
-          country: destination.countryCode || "IT",
+          country_code: destination.countryCode || "IT",
           zip: destination.postalCode || undefined,
         },
+        use_customer_default_address: false,
       },
     }
 
-    console.log("[getShopifyShippingRates] GraphQL variables:", JSON.stringify(variables, null, 2))
-
-    const response = await fetch(
-      `https://${shopifyDomain}/api/2024-10/graphql.json`,
+    const createResponse = await fetch(
+      `https://${shopifyDomain}/admin/api/2024-10/draft_orders.json`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Shopify-Storefront-Access-Token": storefrontToken,
+          "X-Shopify-Access-Token": adminToken,
         },
-        body: JSON.stringify({ query: mutation, variables }),
+        body: JSON.stringify(draftOrderPayload),
       }
     )
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error("[getShopifyShippingRates] HTTP error:", response.status, errorText)
-      throw new Error(`HTTP ${response.status}: ${errorText}`)
+    if (!createResponse.ok) {
+      const errorText = await createResponse.text()
+      console.error("[calculateShippingWithAdmin] Errore creazione draft order:", createResponse.status, errorText)
+      throw new Error(`Errore creazione draft order: ${createResponse.status}`)
     }
 
-    const result = await response.json()
+    const draftOrderResult = await createResponse.json()
 
-    if (result.errors) {
-      console.error("[getShopifyShippingRates] GraphQL errors:", JSON.stringify(result.errors, null, 2))
-      throw new Error(result.errors[0]?.message || "Errore GraphQL")
-    }
-
-    const checkoutUserErrors = result.data?.checkoutCreate?.checkoutUserErrors
-    if (checkoutUserErrors && checkoutUserErrors.length > 0) {
-      console.error("[getShopifyShippingRates] Checkout errors:", JSON.stringify(checkoutUserErrors, null, 2))
-      throw new Error(checkoutUserErrors[0]?.message || "Errore creazione checkout")
-    }
-
-    const checkout = result.data?.checkoutCreate?.checkout
-    if (!checkout) {
-      console.error("[getShopifyShippingRates] Nessun checkout creato")
+    if (!draftOrderResult.draft_order?.id) {
+      console.error("[calculateShippingWithAdmin] Nessun draft order creato")
       return null
     }
 
-    console.log(`[getShopifyShippingRates] Checkout creato: ${checkout.id}`)
+    const draftOrderId = draftOrderResult.draft_order.id
 
-    const availableShippingRates = checkout.availableShippingRates
-    if (!availableShippingRates?.ready) {
-      console.warn("[getShopifyShippingRates] ⚠️ Tariffe non pronte")
+    console.log(`[calculateShippingWithAdmin] Draft order creato: ${draftOrderId}`)
+
+    // Ottieni le shipping rates per questo draft order
+    const ratesResponse = await fetch(
+      `https://${shopifyDomain}/admin/api/2024-10/draft_orders/${draftOrderId}/shipping_rates.json`,
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": adminToken,
+        },
+      }
+    )
+
+    if (!ratesResponse.ok) {
+      const errorText = await ratesResponse.text()
+      console.error("[calculateShippingWithAdmin] Errore recupero shipping rates:", ratesResponse.status, errorText)
+      
+      // Elimina draft order prima di uscire
+      await fetch(
+        `https://${shopifyDomain}/admin/api/2024-10/draft_orders/${draftOrderId}.json`,
+        {
+          method: "DELETE",
+          headers: { "X-Shopify-Access-Token": adminToken },
+        }
+      )
+      
       return null
     }
 
-    const shippingRates = availableShippingRates.shippingRates || []
+    const ratesResult = await ratesResponse.json()
+
+    // Elimina il draft order (pulizia)
+    await fetch(
+      `https://${shopifyDomain}/admin/api/2024-10/draft_orders/${draftOrderId}.json`,
+      {
+        method: "DELETE",
+        headers: { "X-Shopify-Access-Token": adminToken },
+      }
+    )
+
+    const shippingRates = ratesResult.shipping_rates || []
+
+    if (shippingRates.length === 0) {
+      console.warn("[calculateShippingWithAdmin] Nessuna shipping rate disponibile")
+      return null
+    }
 
     console.log(
-      `[getShopifyShippingRates] ✅ ${shippingRates.length} tariffe:`,
-      shippingRates.map((r: any) => `${r.title}: ${r.priceV2?.amount} ${r.priceV2?.currencyCode}`)
+      `[calculateShippingWithAdmin] ✅ ${shippingRates.length} tariffe:`,
+      shippingRates.map((r: any) => `${r.title}: ${r.price} EUR`)
     )
 
     return shippingRates.map((rate: any) => ({
-      handle: rate.handle,
+      handle: rate.handle || rate.id,
       title: rate.title,
-      price: {
-        amount: rate.priceV2?.amount || rate.price?.amount || "0",
-        currencyCode: rate.priceV2?.currencyCode || rate.price?.currencyCode || "EUR",
-      },
+      price: rate.price,
     }))
   } catch (error: any) {
-    console.error("[getShopifyShippingRates] errore:", error)
+    console.error("[calculateShippingWithAdmin] errore:", error)
     throw error
+  }
+}
+
+// Fallback: tariffe fisse se Shopify non risponde
+function getFallbackShipping(countryCode: string): number {
+  const country = countryCode.toUpperCase()
+  
+  if (country === "IT") {
+    return 500 // 5€
+  } else if (["FR", "DE", "ES", "AT", "BE", "NL", "PT", "IE", "LU"].includes(country)) {
+    return 1000 // 10€
+  } else if (["GB", "CH", "NO", "SE", "DK", "FI"].includes(country)) {
+    return 1500 // 15€
+  } else {
+    return 2000 // 20€
   }
 }
 
