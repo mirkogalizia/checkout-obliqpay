@@ -71,11 +71,9 @@ function formatMoney(cents: number | undefined, currency: string = "EUR") {
 function CheckoutInner({
   cart,
   sessionId,
-  initialClientSecret,
 }: {
   cart: CartSessionResponse
   sessionId: string
-  initialClientSecret: string | null
 }) {
   const stripe = useStripe()
   const elements = useElements()
@@ -95,11 +93,10 @@ function CheckoutInner({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-  
-  // Stato per spedizione e payment intent
   const [calculatedShippingCents, setCalculatedShippingCents] = useState<number>(0)
   const [isCalculatingShipping, setIsCalculatingShipping] = useState(false)
-  const [clientSecret, setClientSecret] = useState<string | null>(initialClientSecret)
+  const [clientSecret, setClientSecret] = useState<string | null>(null)
+  const [shippingError, setShippingError] = useState<string | null>(null)
 
   const currency = (cart.currency || "EUR").toUpperCase()
 
@@ -111,7 +108,6 @@ function CheckoutInner({
     }, 0)
   }, [cart])
 
-  // Usa la spedizione calcolata invece di quella dalla sessione
   const shippingCents = calculatedShippingCents
 
   const totalFromSession =
@@ -124,12 +120,9 @@ function CheckoutInner({
     return raw > 0 ? raw : 0
   }, [subtotalCents, shippingCents, totalFromSession])
 
-  // TOTALE DA PAGARE: subtotale - sconto + spedizione calcolata
   const totalToPayCents = subtotalCents - discountCents + calculatedShippingCents
 
-  function handleChange(
-    e: ChangeEvent<HTMLInputElement | HTMLSelectElement>,
-  ) {
+  function handleChange(e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
     const { name, value } = e.target
     setCustomer((prev) => ({ ...prev, [name]: value }))
   }
@@ -146,20 +139,20 @@ function CheckoutInner({
     )
   }
 
-  // EFFETTO: calcola spedizione quando il form è completo
   useEffect(() => {
     async function calculateShipping() {
       if (!isFormValid()) {
         setCalculatedShippingCents(0)
-        setClientSecret(null) // Reset payment intent se form non valido
+        setClientSecret(null)
+        setShippingError(null)
         return
       }
 
       setIsCalculatingShipping(true)
       setError(null)
+      setShippingError(null)
 
       try {
-        // 1) Calcola spedizione
         const shippingRes = await fetch("/api/calculate-shipping", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -183,7 +176,6 @@ function CheckoutInner({
         const newShippingCents = shippingData.shippingCents || 0
         setCalculatedShippingCents(newShippingCents)
 
-        // 2) Crea/Aggiorna Payment Intent con il totale corretto
         const newTotalCents = subtotalCents - discountCents + newShippingCents
 
         const piRes = await fetch("/api/payment-intent", {
@@ -216,7 +208,7 @@ function CheckoutInner({
         setIsCalculatingShipping(false)
       } catch (err: any) {
         console.error("Errore calcolo spedizione/payment:", err)
-        setError(err.message || "Errore nel calcolo della spedizione")
+        setShippingError(err.message || "Errore nel calcolo della spedizione")
         setIsCalculatingShipping(false)
       }
     }
@@ -327,8 +319,7 @@ function CheckoutInner({
                 Dati di spedizione
               </h2>
               <p className="text-xs text-slate-400">
-                La spedizione verrà calcolata automaticamente dopo aver inserito
-                tutti i dati obbligatori.
+                La spedizione verrà calcolata automaticamente da Shopify.
               </p>
 
               <div className="grid gap-3 md:grid-cols-2">
@@ -453,13 +444,19 @@ function CheckoutInner({
 
               {isCalculatingShipping && (
                 <p className="text-xs text-blue-300/90 bg-blue-900/30 border border-blue-500/30 rounded-xl px-3 py-2">
-                  Calcolo spedizione in corso...
+                  Calcolo spedizione da Shopify in corso...
                 </p>
               )}
 
-              {!clientSecret && !isCalculatingShipping && (
+              {shippingError && (
                 <p className="text-xs text-amber-300/90 bg-amber-900/30 border border-amber-500/30 rounded-xl px-3 py-2">
-                  Inserisci i dati di spedizione completi per inizializzare il pagamento.
+                  {shippingError}
+                </p>
+              )}
+
+              {!clientSecret && !isCalculatingShipping && !shippingError && (
+                <p className="text-xs text-slate-400 bg-slate-800/50 border border-slate-700/50 rounded-xl px-3 py-2">
+                  Inserisci tutti i dati di spedizione per calcolare il totale.
                 </p>
               )}
 
@@ -495,7 +492,7 @@ function CheckoutInner({
 
               {success && (
                 <p className="text-xs text-emerald-300 bg-emerald-950/40 border border-emerald-700/40 rounded-xl px-3 py-2">
-                  Pagamento riuscito. Stiamo creando il tuo ordine su Shopify.
+                  Pagamento riuscito! Stiamo creando il tuo ordine su Shopify.
                 </p>
               )}
             </div>
@@ -508,8 +505,7 @@ function CheckoutInner({
               Articoli nel carrello
             </h2>
             <p className="text-xs text-slate-400">
-              ({cart.items.length} articolo
-              {cart.items.length !== 1 ? "i" : ""})
+              ({cart.items.length} articolo{cart.items.length !== 1 ? "i" : ""})
             </p>
 
             <div className="space-y-4">
@@ -552,8 +548,7 @@ function CheckoutInner({
                         </p>
                       )}
                       <p className="text-[11px] text-slate-400">
-                        {item.quantity}×{" "}
-                        {formatMoney(baseUnit, currency)}
+                        {item.quantity}× {formatMoney(baseUnit, currency)}
                       </p>
 
                       <div className="flex items-center gap-2">
@@ -580,9 +575,7 @@ function CheckoutInner({
 
             <div className="space-y-1 text-xs">
               <div className="flex justify-between">
-                <span className="text-slate-400">
-                  Subtotale prodotti
-                </span>
+                <span className="text-slate-400">Subtotale prodotti</span>
                 <span className="text-slate-100">
                   {formatMoney(subtotalCents, currency)}
                 </span>
@@ -600,10 +593,7 @@ function CheckoutInner({
               <div className="flex justify-between">
                 <span className="text-slate-400">Subtotale</span>
                 <span className="text-slate-100">
-                  {formatMoney(
-                    subtotalCents - discountCents,
-                    currency,
-                  )}
+                  {formatMoney(subtotalCents - discountCents, currency)}
                 </span>
               </div>
 
@@ -623,9 +613,7 @@ function CheckoutInner({
 
             {calculatedShippingCents > 0 && (
               <p className="text-[11px] text-slate-400 mt-1">
-                Spedizione Standard 24/48h
-                <br />
-                Consegna stimata in 24/48h in tutta Italia.
+                Spedizione calcolata da Shopify
               </p>
             )}
 
@@ -673,13 +661,11 @@ function CheckoutPageContent() {
         const res = await fetch(
           `/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`,
         )
-        const data: CartSessionResponse & { error?: string } =
-          await res.json()
+        const data: CartSessionResponse & { error?: string } = await res.json()
 
         if (!res.ok || (data as any).error) {
           setError(
-            data.error ||
-              "Errore nel recupero del carrello. Riprova dal sito.",
+            data.error || "Errore nel recupero del carrello. Riprova dal sito.",
           )
           setLoading(false)
           return
@@ -737,11 +723,7 @@ function CheckoutPageContent() {
 
   return (
     <Elements stripe={stripePromise} options={options}>
-      <CheckoutInner
-        cart={cart}
-        sessionId={sessionId}
-        initialClientSecret={cart.paymentIntentClientSecret || null}
-      />
+      <CheckoutInner cart={cart} sessionId={sessionId} />
     </Elements>
   )
 }
@@ -751,9 +733,7 @@ export default function CheckoutPage() {
     <Suspense
       fallback={
         <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-          <p className="text-sm text-slate-300">
-            Caricamento del checkout…
-          </p>
+          <p className="text-sm text-slate-300">Caricamento del checkout…</p>
         </main>
       }
     >
