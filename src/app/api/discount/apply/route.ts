@@ -1,19 +1,6 @@
 // src/app/api/discount/apply/route.ts
 import { NextRequest, NextResponse } from "next/server"
-
-const SHOPIFY_DOMAIN =
-  process.env.SHOPIFY_SHOP_DOMAIN || process.env.SHOPIFY_SHOP_DOMAIN_1
-const SHOPIFY_TOKEN =
-  process.env.SHOPIFY_ADMIN_API_ACCESS_TOKEN || process.env.SHOPIFY_TOKEN
-const SHOPIFY_API_VERSION =
-  process.env.SHOPIFY_API_VERSION || "2024-01"
-
-if (!SHOPIFY_DOMAIN || !SHOPIFY_TOKEN) {
-  console.warn(
-    "[/api/discount/apply] Variabili ambiente Shopify mancanti. " +
-      "SHOPIFY_SHOP_DOMAIN e SHOPIFY_ADMIN_API_ACCESS_TOKEN sono obbligatorie.",
-  )
-}
+import { getConfig } from "@/lib/config"
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,12 +15,22 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    if (!SHOPIFY_DOMAIN || !SHOPIFY_TOKEN) {
+    // 🔹 Preleva TUTTA la config da Firestore
+    const cfg = await getConfig()
+    const shopDomain = cfg.shopify?.shopDomain
+    const adminToken = cfg.shopify?.adminToken
+    const apiVersion = cfg.shopify?.apiVersion || "2024-10"
+
+    if (!shopDomain || !adminToken) {
+      console.error(
+        "[/api/discount/apply] Config Shopify mancante in Firestore:",
+        cfg.shopify,
+      )
       return NextResponse.json(
         {
           ok: false,
           error:
-            "Configurazione Shopify mancante sul server. Controlla le env.",
+            "Configurazione Shopify mancante sul server (shopDomain/adminToken).",
         },
         { status: 500 },
       )
@@ -42,21 +39,20 @@ export async function POST(req: NextRequest) {
     const normalizedCode = code.trim()
 
     // 1) Lookup del codice sconto
-    const lookupUrl = `https://${SHOPIFY_DOMAIN}/admin/api/${SHOPIFY_API_VERSION}/discount_codes/lookup.json?code=${encodeURIComponent(
+    const lookupUrl = `https://${shopDomain}/admin/api/${apiVersion}/discount_codes/lookup.json?code=${encodeURIComponent(
       normalizedCode,
     )}`
 
     const lookupRes = await fetch(lookupUrl, {
       method: "GET",
       headers: {
-        "X-Shopify-Access-Token": SHOPIFY_TOKEN,
+        "X-Shopify-Access-Token": adminToken,
         "Content-Type": "application/json",
         Accept: "application/json",
       },
     })
 
     if (!lookupRes.ok) {
-      // Shopify restituisce 404 se non trova il codice
       if (lookupRes.status === 404) {
         return NextResponse.json(
           { ok: false, error: "Codice sconto non valido o non attivo." },
@@ -88,11 +84,11 @@ export async function POST(req: NextRequest) {
     const priceRuleId = discountCode.price_rule_id
 
     // 2) Recupera la price rule per capire tipo e valore
-    const prUrl = `https://${SHOPIFY_DOMAIN}/admin/api/${SHOPIFY_API_VERSION}/price_rules/${priceRuleId}.json`
+    const prUrl = `https://${shopDomain}/admin/api/${apiVersion}/price_rules/${priceRuleId}.json`
     const prRes = await fetch(prUrl, {
       method: "GET",
       headers: {
-        "X-Shopify-Access-Token": SHOPIFY_TOKEN,
+        "X-Shopify-Access-Token": adminToken,
         "Content-Type": "application/json",
         Accept: "application/json",
       },
@@ -130,9 +126,7 @@ export async function POST(req: NextRequest) {
     const rawValue = Number(priceRule.value) // es. "-10.0" per 10%
     const absValue = Math.abs(rawValue)
 
-    // ✳️ QUI decidiamo cosa supportare
     if (valueType !== "percentage") {
-      // puoi cambiare questa logica se vuoi gestire anche fixed / shipping
       return NextResponse.json(
         {
           ok: false,
@@ -143,7 +137,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // OK → ritorniamo un oggetto semplice
+    // ✅ Risposta semplice per il frontend
     return NextResponse.json(
       {
         ok: true,
@@ -157,7 +151,10 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error("[/api/discount/apply] Errore:", err)
     return NextResponse.json(
-      { ok: false, error: err?.message || "Errore interno applicazione sconto." },
+      {
+        ok: false,
+        error: err?.message || "Errore interno applicazione sconto.",
+      },
       { status: 500 },
     )
   }
