@@ -8,7 +8,6 @@ import React, {
   ChangeEvent,
 } from "react"
 import { useSearchParams } from "next/navigation"
-import Link from "next/link"
 import { loadStripe } from "@stripe/stripe-js"
 import {
   Elements,
@@ -20,12 +19,6 @@ import {
 const stripePromise = loadStripe(
   process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || "",
 )
-
-const FIXED_SHIPPING_CENTS = 590
-
-/* ---------------------------------------------------------
-   TYPES
---------------------------------------------------------- */
 
 type CheckoutItem = {
   id: string | number
@@ -61,223 +54,11 @@ type Customer = {
   country: string
 }
 
-/* ---------------------------------------------------------
-   INPUT COMPONENT
---------------------------------------------------------- */
+const FIXED_SHIPPING_CENTS = 590
 
-type InputProps = React.InputHTMLAttributes<HTMLInputElement>
-
-function Input(props: InputProps) {
-  const { className = "", ...rest } = props
-  return (
-    <input
-      {...rest}
-      className={[
-        "w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900",
-        "placeholder:text-gray-400",
-        "focus:outline-none focus:ring-2 focus:ring-black focus:border-black",
-        "transition-shadow",
-        className,
-      ].join(" ")}
-    />
-  )
-}
-
-/* ---------------------------------------------------------
-   PAYMENT BOX (STRIPE PAYMENT ELEMENT)
---------------------------------------------------------- */
-
-function PaymentBox({
-  clientSecret,
-  sessionId,
-  customer,
-  totalFormatted,
-}: {
-  clientSecret: string | null
-  sessionId: string
-  customer: Customer
-  totalFormatted: string
-}) {
-  if (!clientSecret) {
-    return (
-      <div className="text-sm text-gray-500">
-        Inserisci i dati di spedizione per attivare il pagamento.
-      </div>
-    )
-  }
-
-  const appearance: any = {
-    theme: "flat",
-    labels: "floating",
-    variables: {
-      colorPrimary: "#000000",
-      colorBackground: "#ffffff",
-      colorText: "#111111",
-      colorDanger: "#df1c41",
-      borderRadius: "10px",
-    },
-    rules: {
-      ".Input": {
-        borderRadius: "10px",
-        border: "1px solid #000000",
-      },
-      ".Block": {
-        borderRadius: "10px",
-        border: "1px solid #000000",
-      },
-      ".Input:focus": {
-        borderColor: "#000000",
-        boxShadow: "0 0 0 1px #000000",
-      },
-    },
-  }
-
-  return (
-    <Elements
-      stripe={stripePromise}
-      options={{ clientSecret, appearance } as any}
-    >
-      <PaymentBoxInner
-        sessionId={sessionId}
-        customer={customer}
-        totalFormatted={totalFormatted}
-      />
-    </Elements>
-  )
-}
-
-function PaymentBoxInner({
-  sessionId,
-  customer,
-  totalFormatted,
-}: {
-  sessionId: string
-  customer: Customer
-  totalFormatted: string
-}) {
-  const stripe = useStripe()
-  const elements = useElements()
-
-  const [cardholderName, setCardholderName] = useState("")
-  const [paying, setPaying] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function handlePay() {
-    if (!stripe || !elements) return
-
-    setPaying(true)
-    setError(null)
-
-    const fullName =
-      cardholderName.trim() ||
-      `${customer.firstName} ${customer.lastName}`.trim()
-
-    try {
-      const { error, paymentIntent } = (await stripe.confirmPayment({
-        elements,
-        confirmParams: {
-          payment_method_data: {
-            billing_details: {
-              name: fullName || undefined,
-              email: customer.email || undefined,
-              phone: customer.phone || undefined,
-              address: {
-                line1: customer.address1 || undefined,
-                line2: customer.address2 || undefined,
-                postal_code: customer.zip || undefined,
-                city: customer.city || undefined,
-                state: customer.province || undefined,
-                country: customer.country || undefined,
-              },
-            },
-          },
-        },
-        redirect: "if_required",
-      } as any)) as {
-        error: any
-        paymentIntent: { id: string; status: string } | null
-      }
-
-      if (error) {
-        console.error(error)
-        setError(error.message || "Errore durante il pagamento")
-        setPaying(false)
-        return
-      }
-
-      if (paymentIntent && paymentIntent.status === "succeeded") {
-        try {
-          // qui puoi anche chiamare la tua /api/shopify/create-order
-          await fetch("/api/shopify/create-order", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionId,
-              paymentIntentId: paymentIntent.id,
-              customer,
-            }),
-          })
-        } catch (e) {
-          console.error("Errore creazione ordine Shopify", e)
-        }
-
-        window.location.href = `/thank-you?sessionId=${encodeURIComponent(
-          sessionId,
-        )}&pi=${encodeURIComponent(paymentIntent.id)}`
-      } else {
-        setError("Pagamento non completato. Riprova.")
-        setPaying(false)
-      }
-    } catch (err: any) {
-      console.error(err)
-      setError(err?.message || "Errore imprevisto durante il pagamento")
-      setPaying(false)
-    }
-  }
-
-  return (
-    <div className="space-y-4">
-      {/* Nome intestatario sopra box carta */}
-      <div>
-        <label className="block text-xs font-medium text-gray-700 mb-1.5">
-          Nome completo sull&apos;intestatario della carta
-        </label>
-        <Input
-          placeholder="Es. Mario Rossi"
-          value={cardholderName}
-          onChange={e => setCardholderName(e.target.value)}
-        />
-      </div>
-
-      <div className="rounded-2xl border border-black/80 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.08)] px-4 py-5">
-        <PaymentElement />
-      </div>
-
-      {error && (
-        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-          {error}
-        </div>
-      )}
-
-      <button
-        onClick={handlePay}
-        disabled={paying || !stripe || !elements}
-        className="w-full inline-flex items-center justify-center rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white hover:bg-gray-900 disabled:opacity-60"
-      >
-        {paying ? "Elaborazione…" : `Paga ora ${totalFormatted}`}
-      </button>
-
-      <p className="text-[11px] text-gray-500">
-        I pagamenti sono elaborati in modo sicuro da Stripe. I dati della carta
-        non passano mai sui nostri server.
-      </p>
-    </div>
-  )
-}
-
-/* ---------------------------------------------------------
-   CHECKOUT PAGE INNER
---------------------------------------------------------- */
+/* ---------------------------------------------
+   COMPONENTE PRINCIPALE
+---------------------------------------------- */
 
 function CheckoutPageInner() {
   const searchParams = useSearchParams()
@@ -287,6 +68,7 @@ function CheckoutPageInner() {
   const [error, setError] = useState<string | null>(null)
 
   const [items, setItems] = useState<CheckoutItem[]>([])
+  const [rawCartItems, setRawCartItems] = useState<any[]>([])
   const [currency, setCurrency] = useState("EUR")
 
   const [subtotalCents, setSubtotalCents] = useState(0)
@@ -312,17 +94,9 @@ function CheckoutPageInner() {
     country: "IT",
   })
 
-  // --- Stato per codice sconto manuale (da Shopify) ---
-  const [manualCode, setManualCode] = useState("")
-  const [appliedManualCode, setAppliedManualCode] = useState<string | null>(null)
-  const [manualDiscountCents, setManualDiscountCents] = useState(0)
-  const [manualDiscountError, setManualDiscountError] = useState<string | null>(
-    null,
-  )
-  const [manualDiscountLoading, setManualDiscountLoading] = useState(false)
-
-  /* ---------------- CARICA SESSIONE CARRELLO ---------------- */
-
+  /* ---------------------------------------------
+     CARICA SESSIONE CARRELLO DA FIREBASE
+  ---------------------------------------------- */
   useEffect(() => {
     if (!sessionId) {
       setError("Nessuna sessione di checkout trovata.")
@@ -347,28 +121,33 @@ function CheckoutPageInner() {
         setItems(data.items || [])
         setCurrency((data.currency || "EUR").toUpperCase())
 
+        const sub = Number(data.subtotalCents || 0)
+        const ship = Number(data.shippingCents || 0)
+        const total =
+          data.totalCents != null ? Number(data.totalCents) : sub + ship
+
+        setSubtotalCents(sub)
+        setShippingCents(ship)
+        setTotalCents(total)
+
         const raw = (data as any).rawCart || {}
+        setRawCartItems(Array.isArray(raw.items) ? raw.items : [])
 
         const originalTotal = Number(raw.original_total_price || 0)
-        const cartTotal = Number(raw.total_price || 0)
-
+        const cartTotal = Number(raw.total_price || sub)
         const cartDiscount =
           typeof raw.total_discount === "number"
             ? Number(raw.total_discount)
             : Math.max(0, originalTotal - cartTotal)
 
-        setOriginalSubtotalCents(
-          originalTotal || cartTotal + cartDiscount || 0,
-        )
-        setSubtotalCents(cartTotal || 0)
-        setDiscountCents(cartDiscount || 0)
+        setOriginalSubtotalCents(originalTotal || sub + cartDiscount)
+        setDiscountCents(cartDiscount)
 
         const codes = raw.discount_codes || []
         if (Array.isArray(codes) && codes.length > 0 && codes[0]?.code) {
           setDiscountCode(codes[0].code)
         }
 
-        setTotalCents(cartTotal || 0)
         setError(null)
       } catch (err) {
         console.error(err)
@@ -379,8 +158,9 @@ function CheckoutPageInner() {
     })()
   }, [sessionId])
 
-  /* ---------------- GESTIONE CAMPI INDIRIZZO ---------------- */
-
+  /* ---------------------------------------------
+     GESTIONE CAMPI INDIRIZZO
+  ---------------------------------------------- */
   function handleCustomerChange(
     field: keyof Customer,
     e: ChangeEvent<HTMLInputElement>,
@@ -389,7 +169,7 @@ function CheckoutPageInner() {
     setCustomer(prev => ({ ...prev, [field]: value }))
   }
 
-  // Quando i campi obbligatori sono compilati → aggiungi spedizione 5,90
+  // quando i campi obbligatori sono compilati → aggiungi spedizione 5,90
   useEffect(() => {
     const requiredOk =
       customer.firstName.trim() &&
@@ -402,68 +182,27 @@ function CheckoutPageInner() {
       customer.country.trim()
 
     if (requiredOk && shippingCents === 0) {
-      setShippingCents(FIXED_SHIPPING_CENTS)
+      const ship = FIXED_SHIPPING_CENTS
+      setShippingCents(ship)
+      setTotalCents(subtotalCents + ship)
     } else if (!requiredOk && shippingCents !== 0) {
       setShippingCents(0)
+      setTotalCents(subtotalCents)
     }
-  }, [customer, shippingCents])
+  }, [customer, shippingCents, subtotalCents])
 
-  /* ---------------- CODICE SCONTO MANUALE (Shopify) ---------------- */
-
-  async function handleApplyManualCode() {
-    const code = manualCode.trim()
-    if (!code) return
-
-    setManualDiscountError(null)
-    setManualDiscountLoading(true)
-
-    try {
-      const res = await fetch("/api/discount/apply", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      })
-
-      const data = await res.json()
-
-      if (!res.ok || !data.ok) {
-        setAppliedManualCode(null)
-        setManualDiscountCents(0)
-        setManualDiscountError(data.error || "Codice non valido.")
-        return
-      }
-
-      const percent = Number(data.percent)
-
-      const base = subtotalCents // applichiamo sul subtotale già scontato di Shopify
-      const discount = Math.round((base * percent) / 100)
-
-      setAppliedManualCode(data.code)
-      setManualDiscountCents(discount)
-    } catch (err: any) {
-      console.error(err)
-      setManualDiscountError("Errore durante l'applicazione del codice.")
-    } finally {
-      setManualDiscountLoading(false)
-    }
-  }
-
-  /* ---------------- RICALCOLO TOTALE ---------------- */
-
+  // se cambia il subtotale e la spedizione esiste → aggiorna totale
   useEffect(() => {
-    const total = Math.max(
-      0,
-      subtotalCents - manualDiscountCents + shippingCents,
-    )
-    setTotalCents(total)
-  }, [subtotalCents, shippingCents, manualDiscountCents])
+    setTotalCents(subtotalCents + shippingCents)
+  }, [subtotalCents, shippingCents])
 
-  /* ---------------- CREA PAYMENT INTENT Stripe ---------------- */
-
+  /* ---------------------------------------------
+     CREA / AGGIORNA PAYMENT INTENT STRIPE
+  ---------------------------------------------- */
   useEffect(() => {
     if (!sessionId) return
     if (!subtotalCents) return
-    if (!shippingCents) return // vogliamo avere la spedizione inclusa
+    if (shippingCents <= 0) return
 
     ;(async () => {
       try {
@@ -473,7 +212,6 @@ function CheckoutPageInner() {
           body: JSON.stringify({
             sessionId,
             shippingCents,
-            manualDiscountCents,
             customer,
           }),
         })
@@ -487,9 +225,7 @@ function CheckoutPageInner() {
         console.error("Errore payment-intent:", err)
       }
     })()
-  }, [sessionId, subtotalCents, shippingCents, manualDiscountCents, customer])
-
-  /* ---------------- DERIVATI & UI ---------------- */
+  }, [sessionId, subtotalCents, shippingCents, customer])
 
   const itemsCount = useMemo(
     () => items.reduce((acc, it) => acc + Number(it.quantity || 0), 0),
@@ -499,7 +235,6 @@ function CheckoutPageInner() {
   const subtotalProductsFormatted = (originalSubtotalCents / 100).toFixed(2)
   const subtotalAfterDiscountFormatted = (subtotalCents / 100).toFixed(2)
   const discountFormatted = (discountCents / 100).toFixed(2)
-  const manualDiscountFormatted = (manualDiscountCents / 100).toFixed(2)
   const shippingFormatted = (shippingCents / 100).toFixed(2)
   const totalFormatted = (totalCents / 100).toFixed(2)
 
@@ -530,24 +265,30 @@ function CheckoutPageInner() {
 
   return (
     <main className="min-h-screen bg-white text-black px-4 py-6 md:px-6 lg:px-10">
-      {/* HEADER con logo cliccabile verso questo checkout */}
+      {/* HEADER con logo più grande, click = back al carrello Shopify */}
       <header className="mb-8 flex flex-col items-center gap-2">
-        <Link
-          href={`/checkout?sessionId=${encodeURIComponent(sessionId)}`}
+        <button
+          type="button"
+          onClick={() => {
+            if (typeof window !== "undefined") {
+              window.history.back()
+            }
+          }}
           className="inline-flex items-center justify-center"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="https://cdn.shopify.com/s/files/1/0899/2188/0330/files/logo_checkify_d8a640c7-98fe-4943-85c6-5d1a633416cf.png?v=1761832152"
             alt="NOT FOR RESALE"
-            className="h-14 md:h-20 w-auto"
+            className="h-12 md:h-14 w-auto"
           />
-        </Link>
+        </button>
       </header>
 
       <div className="mx-auto max-w-6xl grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)]">
         {/* COLONNA SINISTRA: dati + articoli */}
         <section className="space-y-8">
+          {/* TITOLO */}
           <div>
             <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">
               Checkout
@@ -645,23 +386,35 @@ function CheckoutPageInner() {
 
             <div className="space-y-3">
               {items.map((item, idx) => {
-                const quantity = item.quantity || 1
-                const discountedLineCents =
-                  item.linePriceCents ?? item.priceCents ?? 0
-                const originalUnitCents = item.priceCents ?? 0
+                const rawLine = rawCartItems.find(
+                  (r: any) =>
+                    String(r.id) === String(item.id) ||
+                    String(r.variant_id) === String(item.id),
+                )
 
-                const unit = (discountedLineCents / quantity / 100) || 0
-                const originalUnit = originalUnitCents
-                  ? originalUnitCents / 100
-                  : null
-                const line = discountedLineCents / 100
+                const quantity = Number(
+                  rawLine?.quantity ?? item.quantity ?? 1,
+                )
 
-                const savingPerUnit =
-                  originalUnit && originalUnit > unit
-                    ? originalUnit - unit
+                const originalLineCents =
+                  typeof rawLine?.original_line_price === "number"
+                    ? rawLine.original_line_price
+                    : (item.priceCents || 0) * quantity
+
+                const finalLineCents =
+                  typeof rawLine?.final_line_price === "number"
+                    ? rawLine.final_line_price
+                    : item.linePriceCents ?? item.priceCents ?? 0
+
+                const unitOriginal = originalLineCents / 100 / quantity
+                const unitFinal = finalLineCents / 100 / quantity
+
+                const linePrice = finalLineCents / 100
+                const unitPrice = unitFinal
+                const saving =
+                  unitOriginal > unitFinal
+                    ? (unitOriginal - unitFinal) * quantity
                     : 0
-                const totalSaving =
-                  savingPerUnit > 0 ? savingPerUnit * quantity : 0
 
                 return (
                   <div
@@ -689,17 +442,17 @@ function CheckoutPageInner() {
                         </div>
                       )}
                       <div className="mt-1 text-[11px] text-gray-500">
-                        {quantity}× {unit.toFixed(2)} {currency}
+                        {quantity}× {unitPrice.toFixed(2)} {currency}
                       </div>
-                      {totalSaving > 0 && (
+                      {saving > 0 && (
                         <div className="mt-0.5 text-[11px] text-emerald-600">
-                          Risparmi {totalSaving.toFixed(2)} {currency}
+                          Risparmi {saving.toFixed(2)} {currency}
                         </div>
                       )}
                     </div>
 
                     <div className="flex flex-col items-end justify-center text-sm font-semibold text-gray-900">
-                      {line.toFixed(2)} {currency}
+                      {linePrice.toFixed(2)} {currency}
                     </div>
                   </div>
                 )
@@ -716,42 +469,6 @@ function CheckoutPageInner() {
               Riepilogo ordine
             </h2>
 
-            {/* Campo codice sconto manuale */}
-            <div className="mb-4 space-y-1">
-              <label className="block text-xs font-medium text-gray-700">
-                Hai un codice sconto?
-              </label>
-
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Inserisci codice"
-                  value={manualCode}
-                  onChange={e => setManualCode(e.target.value)}
-                  className="flex-1"
-                />
-                <button
-                  onClick={handleApplyManualCode}
-                  disabled={manualDiscountLoading || !manualCode.trim()}
-                  className="px-3 py-2 rounded-xl border border-black text-xs font-semibold disabled:opacity-50"
-                >
-                  {manualDiscountLoading ? "..." : "Applica"}
-                </button>
-              </div>
-
-              {manualDiscountError && (
-                <p className="text-[11px] text-red-600">
-                  {manualDiscountError}
-                </p>
-              )}
-
-              {appliedManualCode && manualDiscountCents > 0 && (
-                <p className="text-[11px] text-emerald-700">
-                  Codice <b>{appliedManualCode}</b> applicato: −
-                  {manualDiscountFormatted} {currency}
-                </p>
-              )}
-            </div>
-
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <dt className="text-gray-600">Subtotale prodotti</dt>
@@ -763,22 +480,11 @@ function CheckoutPageInner() {
               {discountCents > 0 && (
                 <div className="flex justify-between">
                   <dt className="text-gray-600">
-                    Sconto carrello
+                    Sconto
                     {discountCode ? ` (${discountCode})` : ""}
                   </dt>
                   <dd className="text-red-600">
                     −{discountFormatted} {currency}
-                  </dd>
-                </div>
-              )}
-
-              {manualDiscountCents > 0 && appliedManualCode && (
-                <div className="flex justify-between">
-                  <dt className="text-gray-600">
-                    Sconto extra ({appliedManualCode})
-                  </dt>
-                  <dd className="text-red-600">
-                    −{manualDiscountFormatted} {currency}
                   </dd>
                 </div>
               )}
@@ -845,9 +551,231 @@ function CheckoutPageInner() {
   )
 }
 
-/* ---------------------------------------------------------
+/* ---------------------------------------------
+   INPUT GENERICO
+---------------------------------------------- */
+
+type InputProps = React.InputHTMLAttributes<HTMLInputElement>
+
+function Input(props: InputProps) {
+  const { className = "", ...rest } = props
+  return (
+    <input
+      className={[
+        "w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900",
+        "placeholder:text-gray-400",
+        "focus:outline-none focus:ring-2 focus:ring-black focus:border-black",
+        "transition-shadow",
+        className,
+      ].join(" ")}
+      {...rest}
+    />
+  )
+}
+
+/* ---------------------------------------------
+   BOX PAGAMENTO STRIPE
+---------------------------------------------- */
+
+function PaymentBox({
+  clientSecret,
+  sessionId,
+  customer,
+  totalFormatted,
+}: {
+  clientSecret: string | null
+  sessionId: string
+  customer: Customer
+  totalFormatted: string
+}) {
+  if (!clientSecret) {
+    return (
+      <div className="text-sm text-gray-500">
+        Inserisci i dati di spedizione per attivare il pagamento.
+      </div>
+    )
+  }
+
+  const options: any = {
+    clientSecret,
+    appearance: {
+      theme: "flat",
+      labels: "floating",
+      variables: {
+        colorPrimary: "#000000",
+        colorBackground: "#ffffff",
+        colorText: "#111111",
+        colorDanger: "#df1c41",
+        borderRadius: "10px",
+      },
+      rules: {
+        ".Block": {
+          borderRadius: "12px",
+          border: "1px solid #111111",
+          boxShadow: "none",
+        },
+        ".Input": {
+          borderRadius: "10px",
+          border: "1px solid #111111",
+          padding: "10px 12px",
+          backgroundColor: "#ffffff",
+          boxShadow: "none",
+        },
+        ".Input:focus": {
+          borderColor: "#000000",
+          boxShadow: "0 0 0 1px #000000",
+        },
+        ".Input--invalid": {
+          borderColor: "#df1c41",
+          boxShadow: "0 0 0 1px #df1c41",
+        },
+      },
+    },
+  }
+
+  return (
+    <Elements stripe={stripePromise} options={options}>
+      <PaymentBoxInner
+        sessionId={sessionId}
+        customer={customer}
+        totalFormatted={totalFormatted}
+      />
+    </Elements>
+  )
+}
+
+function PaymentBoxInner({
+  sessionId,
+  customer,
+  totalFormatted,
+}: {
+  sessionId: string
+  customer: Customer
+  totalFormatted: string
+}) {
+  const stripe = useStripe()
+  const elements = useElements()
+
+  const [cardholderName, setCardholderName] = useState("")
+  const [paying, setPaying] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handlePay() {
+    if (!stripe || !elements) return
+
+    setPaying(true)
+    setError(null)
+
+    const fullName =
+      cardholderName.trim() ||
+      `${customer.firstName} ${customer.lastName}`.trim()
+
+    try {
+      const { error, paymentIntent } = (await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          payment_method_data: {
+            billing_details: {
+              name: fullName || undefined,
+              email: customer.email || undefined,
+              phone: customer.phone || undefined,
+              address: {
+                line1: customer.address1 || undefined,
+                line2: customer.address2 || undefined,
+                postal_code: customer.zip || undefined,
+                city: customer.city || undefined,
+                state: customer.province || undefined,
+                country: customer.country || undefined,
+              },
+            },
+          },
+        },
+        redirect: "if_required",
+      } as any)) as {
+        error: any
+        paymentIntent: { id: string; status: string } | null
+      }
+
+      if (error) {
+        console.error(error)
+        setError(error.message || "Errore durante il pagamento")
+        setPaying(false)
+        return
+      }
+
+      if (paymentIntent && paymentIntent.status === "succeeded") {
+        try {
+          await fetch("/api/shopify/create-order", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionId,
+              paymentIntentId: paymentIntent.id,
+              customer,
+            }),
+          })
+        } catch (e) {
+          console.error("Errore creazione ordine Shopify", e)
+        }
+
+        window.location.href = `/thank-you?sessionId=${encodeURIComponent(
+          sessionId,
+        )}&pi=${encodeURIComponent(paymentIntent.id)}`
+      } else {
+        setError("Pagamento non completato. Riprova.")
+        setPaying(false)
+      }
+    } catch (err: any) {
+      console.error(err)
+      setError(
+        err?.message || "Errore imprevisto durante il pagamento",
+      )
+      setPaying(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1.5">
+          Nome completo sull&apos;intestatario della carta
+        </label>
+        <Input
+          placeholder="Es. Mario Rossi"
+          value={cardholderName}
+          onChange={e => setCardholderName(e.target.value)}
+        />
+      </div>
+
+      <div className="rounded-2xl border border-black/80 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.08)] px-4 py-5">
+        <PaymentElement />
+      </div>
+
+      {error && (
+        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+          {error}
+        </div>
+      )}
+
+      <button
+        onClick={handlePay}
+        disabled={paying || !stripe || !elements}
+        className="w-full inline-flex items-center justify-center rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white hover:bg-gray-900 disabled:opacity-60"
+      >
+        {paying ? "Elaborazione…" : `Paga ora ${totalFormatted}`}
+      </button>
+
+      <p className="text-[11px] text-gray-500">
+        I pagamenti sono elaborati in modo sicuro da Stripe. I dati della carta
+        non passano mai sui nostri server.
+      </p>
+    </div>
+  )
+}
+
+/* ---------------------------------------------
    EXPORT
---------------------------------------------------------- */
+---------------------------------------------- */
 
 export default function CheckoutPage() {
   return (
