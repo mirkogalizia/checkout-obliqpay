@@ -1,7 +1,7 @@
 // src/app/onboarding/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 type StripeAccountInput = {
   label: string;
@@ -19,6 +19,27 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [existingConfig, setExistingConfig] = useState<any>(null);
+
+  // ✅ CARICA CONFIG ESISTENTE
+  useEffect(() => {
+    async function loadConfig() {
+      try {
+        const res = await fetch("/api/config");
+        if (res.ok) {
+          const data = await res.json();
+          setExistingConfig(data);
+          console.log("[onboarding] Config caricata:", data);
+        }
+      } catch (err) {
+        console.error("[onboarding] Errore caricamento config:", err);
+      } finally {
+        setLoadingConfig(false);
+      }
+    }
+    loadConfig();
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -49,7 +70,7 @@ export default function OnboardingPage() {
         order: index,
         merchantSite:
           ((formData.get(`${acc.name}-merchantSite`) as string) || "").trim(),
-        lastUsedAt: 0,
+        lastUsedAt: existingConfig?.stripeAccounts?.[index]?.lastUsedAt || 0,
       })),
 
       defaultCurrency: (
@@ -74,11 +95,29 @@ export default function OnboardingPage() {
       }
 
       setSaved(true);
+      
+      // Ricarica config dopo il salvataggio
+      const reloadRes = await fetch("/api/config");
+      if (reloadRes.ok) {
+        const reloadData = await reloadRes.json();
+        setExistingConfig(reloadData);
+      }
     } catch (err: any) {
       setError(err.message ?? "Errore imprevisto");
     } finally {
       setLoading(false);
     }
+  }
+
+  if (loadingConfig) {
+    return (
+      <main className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-50 flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <div className="w-8 h-8 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="text-sm text-slate-400">Caricamento configurazione...</p>
+        </div>
+      </main>
+    );
   }
 
   return (
@@ -89,15 +128,16 @@ export default function OnboardingPage() {
           <div>
             <div className="inline-flex items-center gap-2 rounded-full bg-white/5 border border-white/10 px-3 py-1 text-xs text-slate-300 backdrop-blur-md">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Setup iniziale • Checkout Hub
+              {existingConfig ? "Modifica configurazione" : "Setup iniziale"} • Checkout Hub
             </div>
             <h1 className="mt-4 text-3xl md:text-4xl font-semibold tracking-tight text-slate-50">
               Collega Shopify, Stripe e Firebase
             </h1>
             <p className="mt-2 text-sm text-slate-400 max-w-xl">
-              Configura una sola volta, poi il tuo checkout custom gestirà in
-              automatico carrelli, pagamenti multi-account Stripe e
-              sincronizzazione ordini.
+              {existingConfig 
+                ? "Modifica la configurazione esistente. I campi sono già compilati con i valori attuali."
+                : "Configura una sola volta, poi il tuo checkout custom gestirà in automatico carrelli, pagamenti multi-account Stripe e sincronizzazione ordini."
+              }
             </p>
           </div>
 
@@ -106,8 +146,10 @@ export default function OnboardingPage() {
               Stato onboarding
             </p>
             <p className="text-sm text-slate-400">
-              Completa i campi essenziali e salva la configurazione. I dati
-              vengono memorizzati in Firebase e riutilizzati dal backend.
+              {existingConfig 
+                ? "✓ Configurazione esistente caricata. Modifica i campi che desideri aggiornare."
+                : "Completa i campi essenziali e salva la configurazione. I dati vengono memorizzati in Firebase e riutilizzati dal backend."
+              }
             </p>
           </div>
         </header>
@@ -144,6 +186,7 @@ export default function OnboardingPage() {
                     name="shopifyDomain"
                     className="glass-input"
                     placeholder="es. imjsqk-my.myshopify.com"
+                    defaultValue={existingConfig?.shopify?.shopDomain || ""}
                     required
                   />
                 </div>
@@ -154,7 +197,8 @@ export default function OnboardingPage() {
                     name="shopifyAdminToken"
                     type="password"
                     className="glass-input"
-                    placeholder="shpat_********"
+                    placeholder={existingConfig?.shopify?.adminToken ? "••••••••" : "shpat_********"}
+                    defaultValue={existingConfig?.shopify?.adminToken || ""}
                     required
                   />
                 </div>
@@ -165,7 +209,8 @@ export default function OnboardingPage() {
                     name="shopifyStorefrontToken"
                     type="password"
                     className="glass-input"
-                    placeholder="Storefront token per leggere il carrello/prodotti"
+                    placeholder={existingConfig?.shopify?.storefrontToken ? "••••••••" : "Storefront token"}
+                    defaultValue={existingConfig?.shopify?.storefrontToken || ""}
                     required
                   />
                 </div>
@@ -176,7 +221,7 @@ export default function OnboardingPage() {
                     <input
                       name="defaultCurrency"
                       className="glass-input"
-                      defaultValue="EUR"
+                      defaultValue={existingConfig?.defaultCurrency || "EUR"}
                       placeholder="EUR"
                     />
                   </div>
@@ -203,105 +248,124 @@ export default function OnboardingPage() {
               </div>
 
               <div className="grid gap-4">
-                {STRIPE_ACCOUNTS.map((acc, index) => (
-                  <div
-                    key={acc.name}
-                    className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-semibold text-slate-200">
-                          {acc.label}
-                        </p>
-                        <p className="text-[11px] text-slate-400">
-                          Opzionale. Puoi anche usarne solo uno.
-                        </p>
-                      </div>
-                      <label className="inline-flex items-center gap-2 text-[11px] text-slate-300">
-                        <input
-                          type="checkbox"
-                          name={`${acc.name}-active`}
-                          defaultChecked={index === 0}
-                          className="h-3.5 w-3.5 rounded border-white/30 bg-slate-900/60"
-                        />
-                        Attivo
-                      </label>
-                    </div>
-
-                    <div className="grid gap-3">
-                      <div>
-                        <label className="glass-label">Label interna</label>
-                        <input
-                          name={`${acc.name}-label`}
-                          className="glass-input"
-                          placeholder={`es. Stripe NFR ${index + 1}`}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="glass-label">Secret Key</label>
-                        <input
-                          name={`${acc.name}-secret`}
-                          type="password"
-                          className="glass-input"
-                          placeholder="sk_live_*** o sk_test_***"
-                        />
-                        <p className="text-[10px] text-slate-500 mt-1">
-                          📍 Stripe Dashboard → Developers → API keys → Secret key
-                        </p>
-                      </div>
-
-                      <div>
-                        <label className="glass-label">Publishable Key</label>
-                        <input
-                          name={`${acc.name}-publishable`}
-                          type="text"
-                          className="glass-input"
-                          placeholder="pk_live_*** o pk_test_***"
-                        />
-                        <p className="text-[10px] text-slate-500 mt-1">
-                          📍 Stripe Dashboard → Developers → API keys → Publishable key
-                        </p>
-                      </div>
-
-                      <div>
-                        <label className="glass-label">
-                          Webhook Secret{" "}
-                          <span className="text-[10px] font-normal text-amber-400">
-                            (Richiesto per ordini automatici)
-                          </span>
+                {STRIPE_ACCOUNTS.map((acc, index) => {
+                  const existingAccount = existingConfig?.stripeAccounts?.[index];
+                  
+                  return (
+                    <div
+                      key={acc.name}
+                      className="rounded-2xl border border-white/10 bg-white/3 p-4 space-y-3"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold text-slate-200">
+                            {existingAccount?.label || acc.label}
+                          </p>
+                          <p className="text-[11px] text-slate-400">
+                            {existingAccount ? "✓ Configurato" : "Opzionale. Puoi anche usarne solo uno."}
+                          </p>
+                        </div>
+                        <label className="inline-flex items-center gap-2 text-[11px] text-slate-300">
+                          <input
+                            type="checkbox"
+                            name={`${acc.name}-active`}
+                            defaultChecked={existingAccount?.active ?? (index === 0)}
+                            className="h-3.5 w-3.5 rounded border-white/30 bg-slate-900/60"
+                          />
+                          Attivo
                         </label>
-                        <input
-                          name={`${acc.name}-webhook`}
-                          type="password"
-                          className="glass-input"
-                          placeholder="whsec_***"
-                        />
-                        <div className="mt-2 space-y-1 text-[10px] text-slate-500">
-                          <p className="font-medium text-slate-400">📍 Come ottenerlo:</p>
-                          <ol className="list-decimal list-inside space-y-0.5 pl-2">
-                            <li>Stripe Dashboard → Developers → Webhooks</li>
-                            <li>Click "Add endpoint"</li>
-                            <li>URL: <code className="text-emerald-400">https://tuo-dominio.vercel.app/api/webhooks/stripe</code></li>
-                            <li>Eventi: seleziona <code className="text-emerald-400">payment_intent.succeeded</code></li>
-                            <li>Copia il "Signing secret" (inizia con whsec_)</li>
-                          </ol>
+                      </div>
+
+                      <div className="grid gap-3">
+                        <div>
+                          <label className="glass-label">Label interna</label>
+                          <input
+                            name={`${acc.name}-label`}
+                            className="glass-input"
+                            placeholder={`es. Stripe NFR ${index + 1}`}
+                            defaultValue={existingAccount?.label || ""}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="glass-label">Secret Key</label>
+                          <input
+                            name={`${acc.name}-secret`}
+                            type="password"
+                            className="glass-input"
+                            placeholder={existingAccount?.secretKey ? "sk_•••• (già salvata)" : "sk_live_*** o sk_test_***"}
+                            defaultValue={existingAccount?.secretKey || ""}
+                          />
+                          <p className="text-[10px] text-slate-500 mt-1">
+                            📍 Stripe Dashboard → Developers → API keys → Secret key
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="glass-label">Publishable Key</label>
+                          <input
+                            name={`${acc.name}-publishable`}
+                            type="text"
+                            className="glass-input"
+                            placeholder={existingAccount?.publishableKey ? "pk_•••• (già salvata)" : "pk_live_*** o pk_test_***"}
+                            defaultValue={existingAccount?.publishableKey || ""}
+                          />
+                          <p className="text-[10px] text-slate-500 mt-1">
+                            📍 Stripe Dashboard → Developers → API keys → Publishable key
+                          </p>
+                        </div>
+
+                        <div>
+                          <label className="glass-label">
+                            Webhook Secret{" "}
+                            <span className="text-[10px] font-normal text-amber-400">
+                              (Richiesto per ordini automatici)
+                            </span>
+                          </label>
+                          <input
+                            name={`${acc.name}-webhook`}
+                            type="password"
+                            className="glass-input"
+                            placeholder={existingAccount?.webhookSecret ? "whsec_•••• (già salvato)" : "whsec_***"}
+                            defaultValue={existingAccount?.webhookSecret || ""}
+                          />
+                          <div className="mt-2 space-y-1 text-[10px] text-slate-500">
+                            <p className="font-medium text-slate-400">📍 Come ottenerlo:</p>
+                            <ol className="list-decimal list-inside space-y-0.5 pl-2">
+                              <li>Stripe Dashboard → Developers → Webhooks</li>
+                              <li>Click &quot;Add endpoint&quot;</li>
+                              <li>
+                                URL:{" "}
+                                <code className="text-emerald-400">
+                                  https://tuo-dominio.vercel.app/api/webhooks/stripe
+                                </code>
+                              </li>
+                              <li>
+                                Eventi: seleziona{" "}
+                                <code className="text-emerald-400">
+                                  payment_intent.succeeded
+                                </code>
+                              </li>
+                              <li>Copia il &quot;Signing secret&quot; (inizia con whsec_)</li>
+                            </ol>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="glass-label">
+                            Merchant site (per metadata / descriptor)
+                          </label>
+                          <input
+                            name={`${acc.name}-merchantSite`}
+                            className="glass-input"
+                            placeholder="es. https://notforresale.it"
+                            defaultValue={existingAccount?.merchantSite || ""}
+                          />
                         </div>
                       </div>
-
-                      <div>
-                        <label className="glass-label">
-                          Merchant site (per metadata / descriptor)
-                        </label>
-                        <input
-                          name={`${acc.name}-merchantSite`}
-                          className="glass-input"
-                          placeholder="es. https://notforresale.it"
-                        />
-                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
           </div>
@@ -378,7 +442,7 @@ export default function OnboardingPage() {
                   className="glass-button-primary w-full"
                   disabled={loading}
                 >
-                  {loading ? "Salvataggio in corso…" : "Salva configurazione"}
+                  {loading ? "Salvataggio in corso…" : existingConfig ? "Aggiorna configurazione" : "Salva configurazione"}
                 </button>
                 <button
                   type="button"
