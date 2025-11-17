@@ -100,7 +100,8 @@ function CheckoutInner({
   const [shippingError, setShippingError] = useState<string | null>(null)
 
   const addressInputRef = useRef<HTMLInputElement>(null)
-  const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null)
+  const autocompleteRef = useRef<any>(null)
+  const scriptLoadedRef = useRef(false)
 
   const currency = (cart.currency || "EUR").toUpperCase()
 
@@ -122,62 +123,105 @@ function CheckoutInner({
 
   const totalToPayCents = subtotalCents - discountCents + calculatedShippingCents
 
-  // ✅ FIX: Google Maps Autocomplete
+  // ✅ GOOGLE MAPS AUTOCOMPLETE - VERSIONE FIXATA
   useEffect(() => {
-    if (!addressInputRef.current) return
+    let mounted = true
+    const win = window as any
 
     const initAutocomplete = () => {
-      if (!addressInputRef.current || !window.google) return
+      if (!mounted || !addressInputRef.current) {
+        console.log("[Autocomplete] Skipped: not mounted or no input ref")
+        return
+      }
+
+      if (!win.google?.maps?.places) {
+        console.log("[Autocomplete] Skipped: Google Maps not loaded yet")
+        return
+      }
 
       try {
-        autocompleteRef.current = new window.google.maps.places.Autocomplete(
+        if (autocompleteRef.current) {
+          win.google.maps.event.clearInstanceListeners(autocompleteRef.current)
+          autocompleteRef.current = null
+        }
+
+        autocompleteRef.current = new win.google.maps.places.Autocomplete(
           addressInputRef.current,
           {
             types: ["address"],
-            componentRestrictions: { country: ["it", "fr", "de", "es", "at", "be", "nl"] },
-            fields: ["address_components", "formatted_address"],
+            componentRestrictions: {
+              country: ["it", "fr", "de", "es", "at", "be", "nl", "ch", "pt"],
+            },
+            fields: ["address_components", "formatted_address", "geometry"],
           }
         )
 
-        autocompleteRef.current.addListener("place_changed", handlePlaceSelect)
-        console.log("[Autocomplete] ✓ Inizializzato")
+        autocompleteRef.current.addListener("place_changed", () => {
+          if (!mounted) return
+          handlePlaceSelect()
+        })
+
+        console.log("[Autocomplete] ✅ Inizializzato correttamente")
       } catch (err) {
-        console.error("[Autocomplete] Errore inizializzazione:", err)
+        console.error("[Autocomplete] ❌ Errore inizializzazione:", err)
       }
     }
 
-    if (!window.google) {
+    if (!win.google?.maps?.places && !scriptLoadedRef.current) {
+      scriptLoadedRef.current = true
+
       const script = document.createElement("script")
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places&language=it&loading=async`
+      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+
+      if (!apiKey) {
+        console.error("[Autocomplete] ❌ NEXT_PUBLIC_GOOGLE_MAPS_API_KEY non configurata")
+        return
+      }
+
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&language=it&callback=initGoogleMaps`
       script.async = true
       script.defer = true
-      script.onload = () => {
-        console.log("[Autocomplete] Google Maps caricato")
-        initAutocomplete()
+
+      win.initGoogleMaps = () => {
+        console.log("[Autocomplete] ✅ Google Maps API caricata")
+        if (mounted) {
+          requestAnimationFrame(() => {
+            initAutocomplete()
+          })
+        }
       }
+
       script.onerror = () => {
-        console.error("[Autocomplete] Errore caricamento Google Maps")
+        console.error("[Autocomplete] ❌ Errore caricamento Google Maps API")
       }
+
       document.head.appendChild(script)
-    } else {
+    } else if (win.google?.maps?.places) {
+      console.log("[Autocomplete] Google Maps già disponibile")
       initAutocomplete()
     }
 
     return () => {
-      if (autocompleteRef.current) {
-        window.google.maps.event.clearInstanceListeners(autocompleteRef.current)
+      mounted = false
+      if (autocompleteRef.current && win.google?.maps?.event) {
+        try {
+          win.google.maps.event.clearInstanceListeners(autocompleteRef.current)
+        } catch (e) {
+          console.log("[Autocomplete] Cleanup error:", e)
+        }
       }
     }
   }, [])
 
   function handlePlaceSelect() {
     const place = autocompleteRef.current?.getPlace()
+
     if (!place || !place.address_components) {
-      console.log("[Autocomplete] Nessun indirizzo selezionato")
+      console.log("[Autocomplete] ⚠️ Nessun indirizzo selezionato o dati incompleti")
       return
     }
 
-    console.log("[Autocomplete] Place selected:", place)
+    console.log("[Autocomplete] 📍 Place selezionato:", place)
 
     let street = ""
     let streetNumber = ""
@@ -186,7 +230,7 @@ function CheckoutInner({
     let postalCode = ""
     let country = ""
 
-    place.address_components.forEach((component) => {
+    place.address_components.forEach((component: any) => {
       const types = component.types
 
       if (types.includes("route")) {
@@ -198,7 +242,16 @@ function CheckoutInner({
       if (types.includes("locality")) {
         city = component.long_name
       }
+      if (types.includes("postal_town") && !city) {
+        city = component.long_name
+      }
+      if (types.includes("administrative_area_level_3") && !city) {
+        city = component.long_name
+      }
       if (types.includes("administrative_area_level_2")) {
+        province = component.short_name
+      }
+      if (types.includes("administrative_area_level_1") && !province) {
         province = component.short_name
       }
       if (types.includes("postal_code")) {
@@ -213,7 +266,7 @@ function CheckoutInner({
 
     setCustomer((prev) => ({
       ...prev,
-      address1: fullAddress,
+      address1: fullAddress || prev.address1,
       city: city || prev.city,
       postalCode: postalCode || prev.postalCode,
       province: province || prev.province,
@@ -467,6 +520,30 @@ function CheckoutInner({
           border-top: 1px solid #e5e7eb;
         }
 
+        .pac-container {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          border-radius: 4px;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+          border-top: 1px solid #d1d5db;
+          margin-top: 2px;
+          z-index: 9999 !important;
+        }
+
+        .pac-item {
+          padding: 8px 12px;
+          font-size: 14px;
+          cursor: pointer;
+        }
+
+        .pac-item:hover {
+          background-color: #f3f4f6;
+        }
+
+        .pac-item-query {
+          font-size: 14px;
+          color: #1a1a1a;
+        }
+
         @media (max-width: 999px) {
           .mobile-order-summary {
             display: block;
@@ -485,7 +562,6 @@ function CheckoutInner({
           }
         }
 
-        /* ✅ Previeni zoom iOS su focus input */
         @media (max-width: 768px) {
           .shopify-input {
             font-size: 16px !important;
@@ -494,7 +570,6 @@ function CheckoutInner({
       `}</style>
 
       <div className="min-h-screen bg-[#fafafa]">
-        {/* Header con Logo Grande */}
         <header className="bg-white border-b border-gray-200">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
             <div className="flex justify-center">
@@ -508,7 +583,6 @@ function CheckoutInner({
           </div>
         </header>
 
-        {/* Mobile Order Summary (Collapsible) */}
         <div className="mobile-order-summary bg-white border-b border-gray-200 lg:hidden">
           <details className="px-4 py-3">
             <summary className="flex justify-between items-center cursor-pointer">
@@ -583,13 +657,10 @@ function CheckoutInner({
           </details>
         </div>
 
-        {/* Main Content */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
           <div className="lg:grid lg:grid-cols-2 lg:gap-12">
-            {/* Left Column - Form */}
             <div className="order-2 lg:order-1">
               <form onSubmit={handleSubmit} className="space-y-6">
-                {/* Contact */}
                 <div className="shopify-card">
                   <h2 className="text-lg font-semibold mb-4">Contatti</h2>
                   <div className="space-y-4">
@@ -608,7 +679,6 @@ function CheckoutInner({
                   </div>
                 </div>
 
-                {/* Delivery */}
                 <div className="shopify-card">
                   <h2 className="text-lg font-semibold mb-4">Consegna</h2>
                   <div className="space-y-4">
@@ -627,7 +697,7 @@ function CheckoutInner({
                     <div>
                       <label className="shopify-label">
                         Indirizzo{" "}
-                        <span className="text-xs text-gray-500">(inizia a digitare)</span>
+                        <span className="text-xs text-blue-600">🔍 Digita per autocompletare</span>
                       </label>
                       <input
                         ref={addressInputRef}
@@ -638,7 +708,11 @@ function CheckoutInner({
                         placeholder="Via, numero civico"
                         required
                         autoComplete="off"
+                        type="text"
                       />
+                      <p className="text-[10px] text-gray-500 mt-1">
+                        Inizia a digitare e seleziona dalla lista che appare
+                      </p>
                     </div>
 
                     <div>
@@ -703,7 +777,6 @@ function CheckoutInner({
                   </div>
                 </div>
 
-                {/* Shipping Method */}
                 {calculatedShippingCents > 0 && (
                   <div className="shopify-card">
                     <h2 className="text-lg font-semibold mb-4">Metodo di spedizione</h2>
@@ -716,7 +789,6 @@ function CheckoutInner({
                   </div>
                 )}
 
-                {/* Payment */}
                 <div className="shopify-card">
                   <h2 className="text-lg font-semibold mb-4">Pagamento</h2>
 
@@ -774,7 +846,6 @@ function CheckoutInner({
               </form>
             </div>
 
-            {/* Right Column - Order Summary (Desktop) */}
             <div className="desktop-order-summary order-1 lg:order-2 mb-8 lg:mb-0">
               <div className="shopify-card lg:sticky lg:top-6">
                 <h2 className="text-lg font-semibold mb-4">Riepilogo ordine</h2>
@@ -957,4 +1028,3 @@ export default function CheckoutPage() {
     </Suspense>
   )
 }
-
