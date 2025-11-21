@@ -5,7 +5,7 @@ import { getConfig, StripeAccount } from "@/lib/config"
 
 const SIX_HOURS = 6 * 60 * 60 * 1000
 
-// ✅ NUOVO TIPO: Estende StripeAccount con istanza Stripe
+// ✅ TIPO: Estende StripeAccount con istanza Stripe
 export type ActiveStripeAccount = StripeAccount & {
   stripe: Stripe
 }
@@ -31,6 +31,25 @@ export async function getActiveStripeAccount(): Promise<ActiveStripeAccount> {
   const accountIndex = hoursSinceEpoch % activeAccounts.length
 
   const selectedAccount = activeAccounts[accountIndex]
+
+  // ✅ LOG SUPER DETTAGLIATO
+  console.log('[stripeRotation] 🔍 DEBUG:', {
+    timestamp: new Date().toISOString(),
+    hoursSinceEpoch,
+    accountIndex,
+    totalActive: activeAccounts.length,
+    accounts: activeAccounts.map(a => ({
+      label: a.label,
+      order: a.order,
+      secretStart: a.secretKey.substring(0, 25) + '...'
+    })),
+    SELECTED: {
+      label: selectedAccount.label,
+      order: selectedAccount.order,
+      secretStart: selectedAccount.secretKey.substring(0, 25) + '...',
+      merchantSite: selectedAccount.merchantSite,
+    }
+  })
 
   // Aggiorna lastUsedAt solo se è passata almeno 1 ora
   const currentLastUsed = selectedAccount.lastUsedAt || 0
