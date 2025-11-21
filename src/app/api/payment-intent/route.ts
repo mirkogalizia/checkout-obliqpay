@@ -68,6 +68,30 @@ export async function POST(req: NextRequest) {
     // ✅ USA SEMPRE L'ACCOUNT ATTIVO CORRENTE
     const activeAccount = await getActiveStripeAccount()
 
+    // ✅ LOG ESPLICITO DELLA SECRET KEY USATA
+    console.log('[payment-intent] 🔑 SECRET KEY USATA:', {
+      label: activeAccount.label,
+      secretKeyFull: activeAccount.secretKey,
+      secretKeyStart: activeAccount.secretKey.substring(0, 35),
+    })
+
+    // ✅ VERIFICA ESPLICITA
+    if (activeAccount.label === 'US 2 CUMPEN') {
+      console.log('[payment-intent] ✅ Dovrebbe usare: sk_live_51SPOFcIUmZFho3kP...')
+      if (!activeAccount.secretKey.startsWith('sk_live_51SPOFcIUmZFho3kP')) {
+        console.error('[payment-intent] ❌ ERRORE! Usa secret key di NFR1 invece di US 2 CUMPEN!')
+        console.error('[payment-intent] ❌ Secret ricevuta:', activeAccount.secretKey.substring(0, 35))
+      }
+    }
+
+    if (activeAccount.label === 'NFR1') {
+      console.log('[payment-intent] ✅ Dovrebbe usare: sk_live_51ROEYLCa9HTwxY0v...')
+      if (!activeAccount.secretKey.startsWith('sk_live_51ROEYLCa9HTwxY0v')) {
+        console.error('[payment-intent] ❌ ERRORE! Usa secret key di US 2 CUMPEN invece di NFR1!')
+        console.error('[payment-intent] ❌ Secret ricevuta:', activeAccount.secretKey.substring(0, 35))
+      }
+    }
+
     const secretKey = activeAccount.secretKey
     const merchantSite = activeAccount.merchantSite || 'https://nfrcheckout.com'
 
