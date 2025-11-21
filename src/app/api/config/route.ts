@@ -6,7 +6,7 @@ export async function GET() {
   try {
     const cfg = await getConfig()
 
-    // ✅ Normalizza stripeAccounts per garantire tutti i campi
+    // ✅ Normalizza stripeAccounts per garantire tutti i campi (inclusi productTitle)
     const normalizedAccounts = (cfg.stripeAccounts || []).map((acc: any, index: number) => ({
       label: acc.label || `Account ${index + 1}`,
       secretKey: "", // Non inviare al client
@@ -16,6 +16,17 @@ export async function GET() {
       order: acc.order ?? index,
       merchantSite: acc.merchantSite || "",
       lastUsedAt: acc.lastUsedAt || 0,
+      // ✅ AGGIUNTA: Product titles
+      productTitle1: acc.productTitle1 || "",
+      productTitle2: acc.productTitle2 || "",
+      productTitle3: acc.productTitle3 || "",
+      productTitle4: acc.productTitle4 || "",
+      productTitle5: acc.productTitle5 || "",
+      productTitle6: acc.productTitle6 || "",
+      productTitle7: acc.productTitle7 || "",
+      productTitle8: acc.productTitle8 || "",
+      productTitle9: acc.productTitle9 || "",
+      productTitle10: acc.productTitle10 || "",
     }))
 
     const safeCfg = {
@@ -52,7 +63,7 @@ export async function POST(req: NextRequest) {
     const existingConfig = await getConfig()
     const existingAccounts = existingConfig.stripeAccounts || []
 
-    // ✅ Stripe Accounts con TUTTI i campi
+    // ✅ Stripe Accounts con TUTTI i campi (inclusi productTitle)
     const stripeAccounts: StripeAccount[] = (body.stripeAccounts || [])
       .slice(0, 4)
       .map((acc: any, idx: number) => {
@@ -67,6 +78,17 @@ export async function POST(req: NextRequest) {
           order: typeof acc.order === "number" ? acc.order : idx,
           merchantSite: (acc.merchantSite || "").trim(),
           lastUsedAt: acc.lastUsedAt ?? existingAccount?.lastUsedAt ?? 0, // ✅ PRESERVA O INIZIALIZZA
+          // ✅ AGGIUNTA: Product titles
+          productTitle1: (acc.productTitle1 || "").trim(),
+          productTitle2: (acc.productTitle2 || "").trim(),
+          productTitle3: (acc.productTitle3 || "").trim(),
+          productTitle4: (acc.productTitle4 || "").trim(),
+          productTitle5: (acc.productTitle5 || "").trim(),
+          productTitle6: (acc.productTitle6 || "").trim(),
+          productTitle7: (acc.productTitle7 || "").trim(),
+          productTitle8: (acc.productTitle8 || "").trim(),
+          productTitle9: (acc.productTitle9 || "").trim(),
+          productTitle10: (acc.productTitle10 || "").trim(),
         }
 
         console.log(`[config POST] Account ${idx} normalizzato:`, {

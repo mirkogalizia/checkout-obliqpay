@@ -80,7 +80,21 @@ export async function POST(req: NextRequest) {
     const statementDescriptorSuffix =
       descriptorRaw.replace(/[^A-Za-z0-9 ]/g, "").slice(0, 22) || "NFR"
 
+    // ✅ NUOVO: Estrai product titles e scegli uno random
+    const productTitles: string[] = []
+    for (let i = 1; i <= 10; i++) {
+      const key = `productTitle${i}` as keyof typeof activeAccount
+      const title = activeAccount[key]
+      if (title && typeof title === 'string' && title.trim()) {
+        productTitles.push(title.trim())
+      }
+    }
+    const randomProductTitle = productTitles.length
+      ? productTitles[Math.floor(Math.random() * productTitles.length)]
+      : 'NFR Product'
+
     console.log(`[payment-intent] 🔄 Account attivo: ${activeAccount.label}`)
+    console.log(`[payment-intent] 🎲 Product title random: ${randomProductTitle}`)
     console.log(`[payment-intent] 💰 Amount: €${(amountCents / 100).toFixed(2)}`)
 
     // Inizializza Stripe con l'account rotato
@@ -119,7 +133,7 @@ export async function POST(req: NextRequest) {
             metadata: {
               merchant_site: merchantSite,
               session_id: sessionId,
-              stripe_account: activeAccount.label, // ✅ Traccia quale account ha creato il customer
+              stripe_account: activeAccount.label,
             },
           })
 
@@ -136,11 +150,6 @@ export async function POST(req: NextRequest) {
         // Continua senza customer ID
       }
     }
-
-    const firstItemTitle =
-      Array.isArray(data.items) && data.items[0]?.title
-        ? String(data.items[0].title)
-        : ""
 
     // ✅ DESCRIPTION: "orderNumber | customer name"
     const orderNumber = data.orderNumber || sessionId
@@ -184,8 +193,8 @@ export async function POST(req: NextRequest) {
           customer_email: email || "",
           customer_name: fullName || "",
           order_id: orderNumber,
-          first_item_title: firstItemTitle,
-          stripe_account: activeAccount.label, // ✅ Traccia account rotato
+          first_item_title: randomProductTitle, // ✅ Product title random
+          stripe_account: activeAccount.label,
           stripe_account_order: String(activeAccount.order || 0),
         },
       }
@@ -221,15 +230,15 @@ export async function POST(req: NextRequest) {
         // ✅ SHIPPING
         shipping: shipping,
 
-        // ✅ METADATA COMPLETO con info rotazione
+        // ✅ METADATA COMPLETO con product title random
         metadata: {
           session_id: sessionId,
           merchant_site: merchantSite,
           customer_email: email || "",
           customer_name: fullName || "",
           order_id: orderNumber,
-          first_item_title: firstItemTitle,
-          stripe_account: activeAccount.label, // ✅ Traccia quale account ha processato
+          first_item_title: randomProductTitle, // ✅ Product title random
+          stripe_account: activeAccount.label,
           stripe_account_order: String(activeAccount.order || 0),
           rotation_timestamp: new Date().toISOString(),
         },
@@ -246,7 +255,7 @@ export async function POST(req: NextRequest) {
       await db.collection(COLLECTION).doc(sessionId).update({
         paymentIntentId: paymentIntent.id,
         paymentIntentClientSecret: paymentIntent.client_secret,
-        stripeAccountLabel: activeAccount.label, // ✅ Traccia account usato
+        stripeAccountLabel: activeAccount.label,
         stripeAccountOrder: activeAccount.order || 0,
         lastRotationAt: new Date().toISOString(),
       })
@@ -270,7 +279,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { 
         clientSecret: paymentIntent.client_secret,
-        accountUsed: activeAccount.label, // ✅ Opzionale: info per debug
+        accountUsed: activeAccount.label,
       },
       { status: 200 }
     )

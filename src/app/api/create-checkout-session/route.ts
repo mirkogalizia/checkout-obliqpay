@@ -38,6 +38,25 @@ export async function POST(request: NextRequest) {
 
     console.log('[Checkout Session] Account Stripe:', activeAccount.label)
 
+    // ✅ NUOVO: Estrai product titles e scegli uno random
+    const productTitles: string[] = []
+    for (let i = 1; i <= 10; i++) {
+      const key = `productTitle${i}` as keyof typeof activeAccount
+      const title = activeAccount[key]
+      if (title && typeof title === 'string' && title.trim()) {
+        productTitles.push(title.trim())
+      }
+    }
+    const randomProductTitle = productTitles.length
+      ? productTitles[Math.floor(Math.random() * productTitles.length)]
+      : 'NFR Product'
+
+    // ✅ NUOVO: Merchant site dall'account
+    const merchantSite = activeAccount.merchantSite || 'https://nfrcheckout.com'
+
+    console.log('[Checkout Session] 🎲 Product title random:', randomProductTitle)
+    console.log('[Checkout Session] 🏪 Merchant site:', merchantSite)
+
     // Calcola totali
     const subtotalCents = cart.items?.reduce((sum: number, item: any) => {
       return sum + (item.linePriceCents || item.priceCents || 0)
@@ -104,7 +123,10 @@ export async function POST(request: NextRequest) {
       metadata: {
         cart_session_id: sessionId,
         stripe_account: activeAccount.label,
+        stripe_account_order: String(activeAccount.order || 0),
         total_amount: String(totalCents),
+        first_item_title: randomProductTitle, // ✅ Product title random
+        merchant_site: merchantSite, // ✅ Merchant site
       },
     })
 
