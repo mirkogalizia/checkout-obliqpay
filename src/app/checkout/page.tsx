@@ -354,6 +354,16 @@ function CheckoutInner({
     try {
       setLoading(true)
 
+      // ✅ 1. Valida e raccogli i dettagli di pagamento
+      const { error: submitError } = await elements.submit()
+      if (submitError) {
+        console.error("Errore submit elements:", submitError)
+        setError(submitError.message || "Errore nella validazione")
+        setLoading(false)
+        return
+      }
+
+      // ✅ 2. Conferma il pagamento
       const { error: stripeError } = await stripe.confirmPayment({
         elements,
         clientSecret: clientSecret,
