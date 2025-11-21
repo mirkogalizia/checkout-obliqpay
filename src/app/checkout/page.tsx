@@ -764,7 +764,7 @@ function CheckoutInner({
                     <p className="text-sm text-red-600 mb-4">{shippingError}</p>
                   )}
 
-                  {clientSecret && !isCalculatingShipping && stripe && elements && (
+                  {clientSecret && !isCalculatingShipping && (
                     <div className="mt-4">
                       <PaymentElement />
                     </div>
@@ -868,7 +868,6 @@ function CheckoutPageContent() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null)
-  const [clientSecret, setClientSecret] = useState<string | null>(null)
 
   useEffect(() => {
     async function load() {
@@ -897,7 +896,6 @@ function CheckoutPageContent() {
 
         setCart(data)
 
-        // ✅ CARICA PUBLISHABLE KEY DINAMICA
         try {
           const pkRes = await fetch('/api/stripe-status')
           
@@ -956,7 +954,6 @@ function CheckoutPageContent() {
     )
   }
 
-  // ✅ Options senza clientSecret - verrà gestito internamente da CheckoutInner
   const options = {
     appearance: {
       theme: "stripe" as const,
