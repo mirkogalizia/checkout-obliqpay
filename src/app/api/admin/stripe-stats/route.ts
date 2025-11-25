@@ -101,6 +101,42 @@ export async function GET(request: NextRequest) {
       0
     )
 
+    // ✅ RECUPERA TRANSAZIONI DA TUTTI GLI ACCOUNT (ultimi 100)
+    let allTransactions: any[] = []
+    
+    for (const account of activeAccounts) {
+      try {
+        const stripe = new Stripe(account.secretKey)
+        
+        const payments = await stripe.paymentIntents.list({
+          limit: 100,
+        })
+
+        const txs = payments.data.map(p => ({
+          id: p.id,
+          amount: p.amount,
+          currency: p.currency,
+          status: p.status,
+          created: p.created,
+          email: p.receipt_email || 'N/A',
+          errorCode: p.last_payment_error?.code,
+          errorMessage: p.last_payment_error?.message,
+          declineCode: p.last_payment_error?.decline_code,
+          account: account.label, // Per sapere da quale account
+        }))
+
+        allTransactions.push(...txs)
+      } catch (error: any) {
+        console.error(`[transactions] Error for ${account.label}:`, error.message)
+      }
+    }
+
+    // Ordina per data (più recenti prima)
+    allTransactions.sort((a, b) => b.created - a.created)
+
+    // Prendi solo le ultime 100
+    allTransactions = allTransactions.slice(0, 100)
+
     return NextResponse.json({
       date: now.toISOString(),
       dateLocal: now.toLocaleString('it-IT', { timeZone: 'Europe/Rome' }),
@@ -119,6 +155,7 @@ export async function GET(request: NextRequest) {
         transactionCount: grandTotalTransactions,
         currency: 'EUR',
       },
+      transactions: allTransactions, // ✅ AGGIUNTO
     })
   } catch (error: any) {
     console.error('[stripe-stats] Error:', error)
@@ -128,3 +165,4 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+
