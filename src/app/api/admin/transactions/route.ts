@@ -5,18 +5,12 @@ import { db } from '@/lib/firebaseAdmin'
 
 export async function GET(req: NextRequest) {
   try {
-    // Verifica password
-    const authHeader = req.headers.get('authorization')
-    const password = authHeader?.replace('Bearer ', '')
+    // Verifica password (stesso metodo di stripe-stats)
+    const { searchParams } = new URL(req.url)
+    const key = searchParams.get('key')
     
-    const ADMIN_SECRET_KEY = process.env.ADMIN_SECRET_KEY
-    
-    if (!ADMIN_SECRET_KEY) {
-      return NextResponse.json({ error: 'Admin key non configurata' }, { status: 500 })
-    }
-    
-    if (password !== ADMIN_SECRET_KEY) {
-      return NextResponse.json({ error: 'Password errata' }, { status: 401 })
+    if (key !== process.env.ADMIN_SECRET_KEY) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '')
@@ -26,7 +20,7 @@ export async function GET(req: NextRequest) {
       limit: 100,
     })
 
-    // Recupera sessioni da Firebase per avere email e dettagli
+    // Recupera sessioni da Firebase
     const sessionsSnapshot = await db.collection('cartSessions')
       .orderBy('createdAt', 'desc')
       .limit(100)
