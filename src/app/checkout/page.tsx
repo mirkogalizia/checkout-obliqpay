@@ -76,38 +76,12 @@ function CheckoutInner({
   const stripe = useStripe()
   const elements = useElements()
 
-  // ✅ MODIFICA: URL DINAMICO DEL CARRELLO CON REFERRER
   const cartUrl = useMemo(() => {
-    // 1️⃣ Prova a usare il referrer del browser (pagina precedente)
-    if (typeof window !== 'undefined' && document.referrer) {
-      const referrer = document.referrer
-      
-      // Se il referrer contiene /cart, usalo direttamente
-      if (referrer.includes('/cart')) {
-        return referrer
-      }
-      
-      // Altrimenti estrai il dominio dal referrer e aggiungi /cart
-      try {
-        const url = new URL(referrer)
-        return `${url.origin}/cart`
-      } catch (e) {
-        console.error('Errore parsing referrer:', e)
-      }
-    }
-    
-    // 2️⃣ Fallback: usa shopDomain dalla sessione
     if (cart.shopDomain) {
       return `https://${cart.shopDomain}/cart`
     }
-    
-    // 3️⃣ Ultimo fallback (solo per dev/test)
     return 'https://imjsqk-my.myshopify.com/cart'
   }, [cart.shopDomain])
-
-  const totalItems = useMemo(() => {
-    return cart.items.reduce((sum, item) => sum + item.quantity, 0)
-  }, [cart.items])
 
   const [customer, setCustomer] = useState<CustomerForm>({
     fullName: "",
@@ -627,54 +601,21 @@ function CheckoutInner({
       `}</style>
 
       <div className="min-h-screen bg-[#fafafa]">
-        {/* ✅ HEADER CON LOGO E CARRELLO - LINK DINAMICO */}
         <header className="bg-white border-b border-gray-200">
           <div className="max-w-6xl mx-auto px-4 py-4">
-            <div className="flex justify-between items-center">
-              {/* Logo - torna al carrello */}
-              <a href={cartUrl} className="flex-shrink-0">
+            <div className="flex justify-center">
+              <a href={cartUrl}>
                 <img
                   src="https://cdn.shopify.com/s/files/1/0899/2188/0330/files/logo_checkify_d8a640c7-98fe-4943-85c6-5d1a633416cf.png?v=1761832152"
                   alt="Logo"
-                  className="h-10 sm:h-12"
+                  className="h-12"
                   style={{ maxWidth: '180px' }}
                 />
-              </a>
-
-              {/* Carrello icon con badge - torna al carrello */}
-              <a 
-                href={cartUrl} 
-                className="relative flex items-center gap-2 text-gray-700 hover:text-gray-900 transition-colors group"
-                aria-label="Torna al carrello"
-              >
-                <div className="relative">
-                  <svg 
-                    className="w-6 h-6 sm:w-7 sm:h-7" 
-                    fill="none" 
-                    stroke="currentColor" 
-                    viewBox="0 0 24 24"
-                  >
-                    <path 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round" 
-                      strokeWidth={2} 
-                      d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" 
-                    />
-                  </svg>
-                  {/* Badge numero articoli */}
-                  {totalItems > 0 && (
-                    <span className="absolute -top-2 -right-2 bg-blue-600 text-white text-xs rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center font-semibold">
-                      {totalItems}
-                    </span>
-                  )}
-                </div>
-                <span className="hidden sm:inline text-sm font-medium">Carrello</span>
               </a>
             </div>
           </div>
         </header>
 
-        {/* Riepilogo ordine mobile */}
         <div className="max-w-2xl mx-auto px-4 py-6 lg:hidden">
           <div
             className="summary-toggle"
@@ -760,11 +701,9 @@ function CheckoutInner({
         <div className="max-w-6xl mx-auto px-4 pb-8">
           <div className="lg:grid lg:grid-cols-2 lg:gap-16">
             
-            {/* Form Checkout */}
             <div>
               <form onSubmit={handleSubmit} className="space-y-5">
 
-                {/* Sezione Contatti */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Contatti</h2>
                   
@@ -794,7 +733,6 @@ function CheckoutInner({
                   </div>
                 </div>
 
-                {/* Sezione Consegna */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Consegna</h2>
                   
@@ -964,7 +902,7 @@ function CheckoutInner({
                   </div>
                 </div>
 
-                {/* Checkbox indirizzo fatturazione diverso */}
+                {/* ✅ CHECKBOX INDIRIZZO FATTURAZIONE DIVERSO */}
                 <div className="flex items-start gap-2 p-4 bg-gray-50 rounded-md border border-gray-200">
                   <input 
                     type="checkbox" 
@@ -978,7 +916,7 @@ function CheckoutInner({
                   </label>
                 </div>
 
-                {/* Sezione Fatturazione (condizionale) */}
+                {/* ✅ FORM INDIRIZZO FATTURAZIONE (CONDIZIONALE) */}
                 {useDifferentBilling && (
                   <div className="shopify-section">
                     <h2 className="shopify-section-title">Fatturazione</h2>
@@ -1092,7 +1030,6 @@ function CheckoutInner({
                   </div>
                 )}
 
-                {/* Sezione Metodo spedizione */}
                 {isFormValid() && (
                   <div className="shopify-section">
                     <h2 className="shopify-section-title">Metodo di spedizione</h2>
@@ -1106,7 +1043,6 @@ function CheckoutInner({
                   </div>
                 )}
 
-                {/* Sezione Pagamento */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Pagamento</h2>
                   <p className="text-xs text-gray-600 mb-4">
@@ -1155,7 +1091,6 @@ function CheckoutInner({
                   )}
                 </div>
 
-                {/* Messaggi di errore/successo */}
                 {error && (
                   <div className="p-4 bg-red-50 border border-red-200 rounded-md">
                     <div className="flex items-start gap-3">
@@ -1173,39 +1108,35 @@ function CheckoutInner({
                       <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                       </svg>
-                      <p className="text-sm text-green-700">Pagamento completato! Reindirizzamento in corso...</p>
+                      <p className="text-sm text-green-700">Pagamento completato! Reindirizzamento...</p>
                     </div>
                   </div>
                 )}
 
-                {/* Bottone Pagamento */}
                 <button
                   type="submit"
-                  disabled={loading || !stripe || !elements || !clientSecret || !isFormValid()}
+                  disabled={loading || !stripe || !elements || !clientSecret || isCalculatingShipping}
                   className="shopify-btn"
                 >
-                  {loading ? 'Elaborazione...' : `Paga ora ${formatMoney(totalToPayCents, currency)}`}
+                  {loading ? "Elaborazione in corso..." : `Paga ora`}
                 </button>
               </form>
             </div>
 
-            {/* Riepilogo Desktop */}
             <div className="hidden lg:block">
-              <div className="sticky top-8 space-y-6">
-                <div className="bg-white border border-gray-200 rounded-lg p-6">
-                  <h2 className="text-lg font-semibold mb-4">Riepilogo ordine</h2>
-                  
+              <div className="sticky top-8">
+                <div className="shopify-section">
                   <div className="space-y-4 mb-6">
                     {cart.items.map((item, idx) => (
-                      <div key={idx} className="flex gap-4">
+                      <div key={idx} className="flex gap-3">
                         {item.image && (
                           <div className="relative flex-shrink-0">
                             <img
                               src={item.image}
                               alt={item.title}
-                              className="w-20 h-20 object-cover rounded border border-gray-200"
+                              className="w-16 h-16 object-cover rounded border border-gray-200"
                             />
-                            <span className="absolute -top-2 -right-2 bg-gray-600 text-white text-xs rounded-full w-6 h-6 flex items-center justify-center font-medium">
+                            <span className="absolute -top-2 -right-2 bg-gray-600 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium">
                               {item.quantity}
                             </span>
                           </div>
@@ -1223,34 +1154,33 @@ function CheckoutInner({
                     ))}
                   </div>
 
-                  <div className="border-t border-gray-200 pt-4 space-y-3 text-sm">
+                  <div className="border-t border-gray-200 pt-4 space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-gray-600">Subtotale</span>
-                      <span className="text-gray-900 font-medium">{formatMoney(subtotalCents, currency)}</span>
+                      <span className="text-gray-900">{formatMoney(subtotalCents, currency)}</span>
                     </div>
 
                     {discountCents > 0 && (
                       <div className="flex justify-between text-green-600">
                         <span>Sconto</span>
-                        <span className="font-medium">-{formatMoney(discountCents, currency)}</span>
+                        <span>-{formatMoney(discountCents, currency)}</span>
                       </div>
                     )}
 
                     <div className="flex justify-between">
                       <span className="text-gray-600">Spedizione</span>
-                      <span className="text-gray-900 font-medium">
-                        {shippingCents > 0 ? formatMoney(shippingCents, currency) : "€5,90"}
-                      </span>
+                      <span className="text-gray-900">{shippingCents > 0 ? formatMoney(shippingCents, currency) : "€5,90"}</span>
                     </div>
 
                     <div className="flex justify-between text-lg font-semibold pt-4 border-t border-gray-200">
                       <span>Totale</span>
-                      <span>{formatMoney(totalToPayCents, currency)}</span>
+                      <span className="text-xl">{formatMoney(totalToPayCents, currency)}</span>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
+
           </div>
         </div>
       </div>
@@ -1258,60 +1188,84 @@ function CheckoutInner({
   )
 }
 
-function CheckoutPage() {
+function CheckoutPageContent() {
   const searchParams = useSearchParams()
-  const sessionId = searchParams?.get("sessionId") || ""
+  const sessionId = searchParams.get("sessionId") || ""
 
   const [cart, setCart] = useState<CartSessionResponse | null>(null)
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  const stripePromise = useMemo(() => {
-    const key = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
-    if (!key) {
-      console.error("Stripe key mancante")
-      return null
-    }
-    return loadStripe(key)
-  }, [])
+  const [loading, setLoading] = useState(true)
+  const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null)
 
   useEffect(() => {
-    if (!sessionId) {
-      setError("Session ID mancante")
-      setLoading(false)
-      return
-    }
+    async function load() {
+      if (!sessionId) {
+        setError("Sessione non valida: manca il sessionId.")
+        setLoading(false)
+        return
+      }
 
-    async function loadCart() {
       try {
-        const res = await fetch(`/api/cart-session?sessionId=${sessionId}`)
-        const data = await res.json()
+        setLoading(true)
+        setError(null)
 
-        if (!res.ok || data.error) {
-          throw new Error(data.error || "Errore caricamento carrello")
+        const res = await fetch(
+          `/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`,
+        )
+        const data: CartSessionResponse & { error?: string } = await res.json()
+
+        if (!res.ok || (data as any).error) {
+          setError(
+            data.error || "Errore nel recupero del carrello. Riprova dal sito.",
+          )
+          setLoading(false)
+          return
         }
 
         setCart(data)
+
+        try {
+          const pkRes = await fetch('/api/stripe-status')
+          
+          if (!pkRes.ok) {
+            throw new Error('API stripe-status non disponibile')
+          }
+          
+          const pkData = await pkRes.json()
+
+          if (pkData.publishableKey) {
+            console.log('[Checkout] ✅ Publishable key caricata')
+            console.log('[Checkout] ✅ Account:', pkData.accountLabel)
+            setStripePromise(loadStripe(pkData.publishableKey))
+          } else {
+            throw new Error('PublishableKey non ricevuta da API')
+          }
+        } catch (err) {
+          console.error('[Checkout] ❌ Errore caricamento stripe-status:', err)
+          setError('Impossibile inizializzare il sistema di pagamento. Riprova.')
+          setLoading(false)
+          return
+        }
+
         setLoading(false)
       } catch (err: any) {
-        console.error("Errore:", err)
-        setError(err.message || "Errore caricamento")
+        console.error("Errore checkout:", err)
+        setError(
+          err?.message || "Errore imprevisto nel caricamento del checkout.",
+        )
         setLoading(false)
       }
     }
 
-    loadCart()
+    load()
   }, [sessionId])
 
-  if (loading) {
+  if (loading || !stripePromise) {
     return (
       <div className="min-h-screen bg-[#fafafa] flex items-center justify-center">
         <div className="text-center">
-          <svg className="animate-spin h-12 w-12 text-blue-600 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <p className="text-gray-600">Caricamento checkout...</p>
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mb-4"></div>
+          <p className="text-sm text-gray-600">Caricamento del checkout…</p>
         </div>
       </div>
     )
@@ -1319,50 +1273,62 @@ function CheckoutPage() {
 
   if (error || !cart) {
     return (
-      <div className="min-h-screen bg-[#fafafa] flex items-center justify-center">
-        <div className="text-center max-w-md mx-auto px-4">
-          <svg className="w-16 h-16 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      <div className="min-h-screen bg-[#fafafa] flex items-center justify-center px-4">
+        <div className="max-w-md text-center space-y-4 p-6 bg-white rounded-lg shadow-sm border border-gray-200">
+          <svg className="w-12 h-12 text-red-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Errore</h1>
-          <p className="text-gray-600 mb-6">{error || "Impossibile caricare il carrello"}</p>
-          <a href="/" className="inline-block px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
-            Torna alla home
-          </a>
+          <h1 className="text-lg font-semibold text-gray-900">Impossibile caricare il checkout</h1>
+          <p className="text-sm text-gray-600">{error}</p>
+          <p className="text-xs text-gray-500">
+            Ritorna al sito e riprova ad aprire il checkout.
+          </p>
         </div>
       </div>
     )
   }
 
-  if (!stripePromise) {
-    return (
-      <div className="min-h-screen bg-[#fafafa] flex items-center justify-center">
-        <p className="text-red-600">Errore configurazione Stripe</p>
-      </div>
-    )
+  const options = {
+    mode: 'payment' as const,
+    amount: 1000,
+    currency: (cart.currency || 'eur').toLowerCase(),
+    paymentMethodTypes: ['card'],
+    appearance: {
+      theme: "stripe" as const,
+      variables: {
+        colorPrimary: "#2C6ECB",
+        colorBackground: "#ffffff",
+        colorText: "#333333",
+        colorDanger: "#df1b41",
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        spacingUnit: '4px',
+        borderRadius: "5px",
+        fontSizeBase: '16px',
+      },
+    },
   }
 
   return (
-    <Elements stripe={stripePromise}>
+    <Elements stripe={stripePromise} options={options}>
       <CheckoutInner cart={cart} sessionId={sessionId} />
     </Elements>
   )
 }
 
-export default function Page() {
+export default function CheckoutPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen bg-[#fafafa] flex items-center justify-center">
-        <div className="text-center">
-          <svg className="animate-spin h-12 w-12 text-blue-600 mx-auto mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <p className="text-gray-600">Caricamento...</p>
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#fafafa] flex items-center justify-center">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mb-4"></div>
+            <p className="text-sm text-gray-600">Caricamento…</p>
+          </div>
         </div>
-      </div>
-    }>
-      <CheckoutPage />
+      }
+    >
+      <CheckoutPageContent />
     </Suspense>
   )
 }
+
