@@ -1,7 +1,5 @@
-// src/components/FacebookPixel.tsx
 'use client'
 import { useEffect } from 'react'
-import { usePathname, useSearchParams } from 'next/navigation'
 
 declare global {
   interface Window {
@@ -10,9 +8,6 @@ declare global {
 }
 
 export default function FacebookPixel() {
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
-
   useEffect(() => {
     const pixelId = process.env.NEXT_PUBLIC_FB_PIXEL_ID
 
@@ -21,7 +16,6 @@ export default function FacebookPixel() {
       return
     }
 
-    // Inizializza Pixel
     if (!window.fbq) {
       window.fbq = function() {
         window.fbq.callMethod 
@@ -41,14 +35,15 @@ export default function FacebookPixel() {
     window.fbq('init', pixelId)
     window.fbq('track', 'PageView')
 
-    // Salva fbclid nei cookie
-    const fbclid = searchParams.get('fbclid')
+    // Salva fbclid se presente nell'URL
+    const urlParams = new URLSearchParams(window.location.search)
+    const fbclid = urlParams.get('fbclid')
     if (fbclid) {
-      document.cookie = `_fbc=fb.1.${Date.now()}.${fbclid}; path=/; max-age=7776000` // 90 giorni
+      document.cookie = `_fbc=fb.1.${Date.now()}.${fbclid}; path=/; max-age=7776000`
     }
 
     console.log('[FB Pixel] ✅ Inizializzato')
-  }, [pathname, searchParams])
+  }, [])
 
   return null
 }
