@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server"
 import Stripe from "stripe"
 import { db } from "@/lib/firebaseAdmin"
 import { getConfig } from "@/lib/config"
+import crypto from "crypto"
 
 const COLLECTION = "cartSessions"
 
@@ -13,7 +14,6 @@ export async function POST(req: NextRequest) {
 
     const config = await getConfig()
     
-    // ✅ FIX: Filtra solo account attivi
     const stripeAccounts = config.stripeAccounts.filter(
       (a: any) => a.secretKey && a.webhookSecret && a.active
     )
@@ -33,7 +33,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No signature" }, { status: 400 })
     }
 
-    // Verifica signature con ogni account configurato
     let event: Stripe.Event | null = null
     let matchedAccount: any = null
 
@@ -59,20 +58,12 @@ export async function POST(req: NextRequest) {
 
     if (!event || !matchedAccount) {
       console.error("[stripe-webhook] 💥 NESSUN ACCOUNT HA VALIDATO LA SIGNATURE!")
-      console.error("[stripe-webhook] Account testati:")
-      stripeAccounts.forEach((acc: any, i: number) => {
-        console.error(`[stripe-webhook]   ${i + 1}. ${acc.label}`)
-        console.error(`[stripe-webhook]      Webhook Secret: ${acc.webhookSecret.substring(0, 25)}...`)
-      })
       return NextResponse.json({ error: "Invalid signature" }, { status: 400 })
     }
 
     console.log(`[stripe-webhook] 📨 Evento: ${event.type}`)
     console.log(`[stripe-webhook] 🏦 Account: ${matchedAccount.label}`)
 
-    // ═══════════════════════════════════════════════════════
-    // PAYMENT INTENT SUCCEEDED
-    // ═══════════════════════════════════════════════════════
     if (event.type === "payment_intent.succeeded") {
       const paymentIntent = event.data.object as Stripe.PaymentIntent
 
@@ -84,14 +75,11 @@ export async function POST(req: NextRequest) {
 
       if (!sessionId) {
         console.error("[stripe-webhook] ❌ NESSUN session_id nei metadata!")
-        console.error("[stripe-webhook] Metadata disponibili:", Object.keys(paymentIntent.metadata))
         return NextResponse.json({ received: true, warning: "no_session_id" }, { status: 200 })
       }
 
       console.log(`[stripe-webhook] 🔑 Session ID: ${sessionId}`)
 
-      // Carica dati sessione da Firebase
-      console.log(`[stripe-webhook] 🔍 Recupero sessione da Firebase...`)
       const snap = await db.collection(COLLECTION).doc(sessionId).get()
       
       if (!snap.exists) {
@@ -104,7 +92,6 @@ export async function POST(req: NextRequest) {
       console.log(`[stripe-webhook] 📦 Items: ${sessionData.items?.length || 0}`)
       console.log(`[stripe-webhook] 👤 Cliente: ${sessionData.customer?.email || 'N/A'}`)
 
-      // Verifica se ordine già creato (evita duplicati)
       if (sessionData.shopifyOrderId) {
         console.log(`[stripe-webhook] ℹ️ Ordine già esistente: #${sessionData.shopifyOrderNumber}`)
         return NextResponse.json({ received: true, alreadyProcessed: true }, { status: 200 })
@@ -112,9 +99,6 @@ export async function POST(req: NextRequest) {
 
       console.log("[stripe-webhook] 🚀 CREAZIONE ORDINE SHOPIFY...")
 
-      // ═══════════════════════════════════════════════════════
-      // CREA ORDINE SHOPIFY
-      // ═══════════════════════════════════════════════════════
       const result = await createShopifyOrder({
         sessionId,
         sessionData,
@@ -126,7 +110,6 @@ export async function POST(req: NextRequest) {
       if (result.orderId) {
         console.log(`[stripe-webhook] 🎉 Ordine creato: #${result.orderNumber} (ID: ${result.orderId})`)
 
-        // Salva dati ordine in Firebase
         await db.collection(COLLECTION).doc(sessionId).update({
           shopifyOrderId: result.orderId,
           shopifyOrderNumber: result.orderNumber,
@@ -137,6 +120,48 @@ export async function POST(req: NextRequest) {
         })
 
         console.log("[stripe-webhook] ✅ Dati salvati in Firebase")
+
+        // ✅ SALVA STATISTICHE GIORNALIERE
+        const today = new Date().toISOString().split('T')[0]
+        const statsRef = db.collection('dailyStats').doc(today)
+
+        await db.runTransaction(async (transaction) => {
+          const statsDoc = await transaction.get(statsRef)
+          
+          if (!statsDoc.exists) {
+            transaction.set(statsRef, {
+              date: today,
+              accounts: {
+                [matchedAccount.label]: {
+                  totalCents: paymentIntent.amount,
+                  transactionCount: 1,
+                }
+              },
+              totalCents: paymentIntent.amount,
+              totalTransactions: 1,
+            })
+          } else {
+            const data = statsDoc.data()!
+            const accountStats = data.accounts?.[matchedAccount.label] || { totalCents: 0, transactionCount: 0 }
+            
+            transaction.update(statsRef, {
+              [`accounts.${matchedAccount.label}.totalCents`]: accountStats.totalCents + paymentIntent.amount,
+              [`accounts.${matchedAccount.label}.transactionCount`]: accountStats.transactionCount + 1,
+              totalCents: (data.totalCents || 0) + paymentIntent.amount,
+              totalTransactions: (data.totalTransactions || 0) + 1,
+            })
+          }
+        })
+
+        console.log("[stripe-webhook] 💾 Statistiche giornaliere aggiornate")
+
+        // ✅ INVIO META CONVERSIONS API (SERVER-SIDE TRACKING)
+        await sendMetaPurchaseEvent({
+          paymentIntent,
+          sessionData,
+          sessionId,
+          req,
+        })
 
         // Svuota carrello
         if (sessionData.rawCart?.id) {
@@ -159,7 +184,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Altri eventi ignorati
     console.log(`[stripe-webhook] ℹ️ Evento ${event.type} ignorato`)
     return NextResponse.json({ received: true }, { status: 200 })
 
@@ -168,6 +192,137 @@ export async function POST(req: NextRequest) {
     console.error("[stripe-webhook] Messaggio:", error.message)
     console.error("[stripe-webhook] Stack:", error.stack)
     return NextResponse.json({ error: error?.message }, { status: 500 })
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// META CONVERSIONS API - SERVER-SIDE TRACKING
+// ═══════════════════════════════════════════════════════════════
+async function sendMetaPurchaseEvent({
+  paymentIntent,
+  sessionData,
+  sessionId,
+  req,
+}: {
+  paymentIntent: any
+  sessionData: any
+  sessionId: string
+  req: NextRequest
+}) {
+  const pixelId = process.env.NEXT_PUBLIC_FB_PIXEL_ID
+  const accessToken = process.env.FB_CAPI_ACCESS_TOKEN
+
+  if (!pixelId || !accessToken) {
+    console.log('[stripe-webhook] ⚠️ Meta Pixel non configurato (skip CAPI)')
+    return
+  }
+
+  try {
+    console.log('[stripe-webhook] 📊 Invio Meta Conversions API...')
+
+    const customer = sessionData.customer || {}
+    
+    // ✅ HASH dati sensibili (requirement Meta)
+    const hashData = (data: string) => {
+      return data ? crypto.createHash('sha256').update(data.toLowerCase().trim()).digest('hex') : undefined
+    }
+
+    const eventId = paymentIntent.id // ← Stesso ID del client per deduplication
+    const eventTime = Math.floor(Date.now() / 1000)
+
+    const userData: any = {
+      client_ip_address: req.headers.get('x-forwarded-for')?.split(',')[0] || 
+                         req.headers.get('x-real-ip') || 
+                         '0.0.0.0',
+      client_user_agent: req.headers.get('user-agent') || '',
+    }
+
+    // ✅ DATI HASHED (obbligatori per match quality)
+    if (customer.email) {
+      userData.em = hashData(customer.email)
+    }
+    if (customer.phone) {
+      const cleanPhone = customer.phone.replace(/\D/g, '')
+      userData.ph = hashData(cleanPhone)
+    }
+    if (customer.fullName) {
+      const nameParts = customer.fullName.split(' ')
+      if (nameParts[0]) userData.fn = hashData(nameParts[0])
+      if (nameParts[1]) userData.ln = hashData(nameParts.slice(1).join(' '))
+    }
+    if (customer.city) {
+      userData.ct = hashData(customer.city)
+    }
+    if (customer.postalCode) {
+      userData.zp = customer.postalCode.replace(/\s/g, '').toLowerCase()
+    }
+    if (customer.countryCode) {
+      userData.country = customer.countryCode.toLowerCase()
+    }
+
+    // ✅ COOKIE Meta (se disponibili)
+    if (paymentIntent.metadata?.fbp) {
+      userData.fbp = paymentIntent.metadata.fbp
+    }
+    if (paymentIntent.metadata?.fbc) {
+      userData.fbc = paymentIntent.metadata.fbc
+    }
+
+    // ✅ CUSTOM DATA (parametri acquisto)
+    const customData: any = {
+      value: paymentIntent.amount / 100,
+      currency: (paymentIntent.currency || 'EUR').toUpperCase(),
+      content_type: 'product',
+    }
+
+    if (sessionData.items && sessionData.items.length > 0) {
+      customData.content_ids = sessionData.items.map((item: any) => String(item.id || item.variant_id))
+      customData.num_items = sessionData.items.length
+      customData.contents = sessionData.items.map((item: any) => ({
+        id: String(item.id || item.variant_id),
+        quantity: item.quantity || 1,
+        item_price: (item.priceCents || 0) / 100,
+      }))
+    }
+
+    // ✅ PAYLOAD META CAPI
+    const payload = {
+      data: [{
+        event_name: 'Purchase',
+        event_time: eventTime,
+        event_id: eventId, // ← DEDUPLICATION con client-side
+        event_source_url: `https://nfrcheckout.com/thank-you?sessionId=${sessionId}`,
+        action_source: 'website',
+        user_data: userData,
+        custom_data: customData,
+      }],
+      access_token: accessToken,
+    }
+
+    console.log('[stripe-webhook] 📤 Payload Meta CAPI:', JSON.stringify(payload, null, 2))
+
+    // ✅ INVIO A META
+    const response = await fetch(
+      `https://graph.facebook.com/v18.0/${pixelId}/events`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }
+    )
+
+    const result = await response.json()
+
+    if (response.ok && result.events_received > 0) {
+      console.log('[stripe-webhook] ✅ Meta CAPI Purchase inviato con successo')
+      console.log('[stripe-webhook] Event ID:', eventId)
+      console.log('[stripe-webhook] Events received:', result.events_received)
+    } else {
+      console.error('[stripe-webhook] ❌ Errore Meta CAPI:', result)
+    }
+
+  } catch (error: any) {
+    console.error('[stripe-webhook] ⚠️ Errore invio Meta CAPI:', error.message)
   }
 }
 
@@ -205,14 +360,12 @@ async function createShopifyOrder({
     console.log(`[createShopifyOrder] 📦 Prodotti: ${items.length}`)
     console.log(`[createShopifyOrder] 👤 Cliente: ${customer.email || 'N/A'}`)
 
-    // Telefono con fallback
     let phoneNumber = (customer.phone || "").trim()
     if (!phoneNumber || phoneNumber.length < 5) {
       phoneNumber = "+39 000 0000000"
       console.log("[createShopifyOrder] ⚠️ Telefono mancante, uso fallback")
     }
 
-    // ✅ FIX TYPESCRIPT: Costruisci line items
     const lineItems = items.map((item: any, index: number) => {
       let variantId = item.variant_id || item.id
       
@@ -251,14 +404,10 @@ async function createShopifyOrder({
     const totalAmount = (paymentIntent.amount / 100).toFixed(2)
     console.log(`[createShopifyOrder] 💰 Totale: €${totalAmount}`)
 
-    // Nome e cognome
     const nameParts = (customer.fullName || "Cliente Checkout").trim().split(/\s+/)
     const firstName = nameParts[0] || "Cliente"
     const lastName = nameParts.slice(1).join(" ") || "Checkout"
 
-    // ═══════════════════════════════════════════════════════
-    // PAYLOAD ORDINE
-    // ═══════════════════════════════════════════════════════
     const orderPayload = {
       order: {
         email: customer.email || "noreply@notforresale.it",
@@ -326,9 +475,6 @@ async function createShopifyOrder({
 
     console.log("[createShopifyOrder] 📤 Invio a Shopify API...")
 
-    // ═══════════════════════════════════════════════════════
-    // CHIAMATA SHOPIFY API
-    // ═══════════════════════════════════════════════════════
     const response = await fetch(
       `https://${shopifyDomain}/admin/api/2024-10/orders.json`,
       {
