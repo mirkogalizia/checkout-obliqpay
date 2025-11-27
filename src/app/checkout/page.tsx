@@ -601,21 +601,29 @@ function CheckoutInner({
       `}</style>
 
       <div className="min-h-screen bg-[#fafafa]">
-        <header className="bg-white border-b border-gray-200">
-          <div className="max-w-6xl mx-auto px-4 py-4">
-            <div className="flex justify-center">
+        {/* ✅ HEADER STICKY con badge sicurezza */}
+        <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
+          <div className="max-w-6xl mx-auto px-4 py-3.5">
+            <div className="flex justify-between items-center">
               <a href={cartUrl}>
                 <img
                   src="https://cdn.shopify.com/s/files/1/0899/2188/0330/files/logo_checkify_d8a640c7-98fe-4943-85c6-5d1a633416cf.png?v=1761832152"
                   alt="Logo"
-                  className="h-12"
-                  style={{ maxWidth: '180px' }}
+                  className="h-8"
+                  style={{ maxWidth: '140px' }}
                 />
               </a>
+              <div className="flex items-center gap-1.5 text-xs text-gray-600 bg-green-50 px-2.5 py-1 rounded-full border border-green-200">
+                <svg className="w-3.5 h-3.5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                </svg>
+                <span className="font-medium hidden sm:inline">Pagamento sicuro</span>
+              </div>
             </div>
           </div>
         </header>
 
+        {/* Mobile Summary Toggle */}
         <div className="max-w-2xl mx-auto px-4 py-6 lg:hidden">
           <div
             className="summary-toggle"
@@ -701,7 +709,30 @@ function CheckoutInner({
         <div className="max-w-6xl mx-auto px-4 pb-8">
           <div className="lg:grid lg:grid-cols-2 lg:gap-16">
             
+            {/* FORM COLUMN */}
             <div>
+              {/* ✅ TRUST BADGES */}
+              <div className="mb-5 bg-gray-50 rounded-lg p-3 border border-gray-200">
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="flex items-center gap-1.5 text-gray-700">
+                    <span>🔒</span>
+                    <span className="leading-tight">3D Secure</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-gray-700">
+                    <span>🚚</span>
+                    <span className="leading-tight">24/48h</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-gray-700">
+                    <span>🔄</span>
+                    <span className="leading-tight">Reso 14gg</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-gray-700">
+                    <span>🛡️</span>
+                    <span className="leading-tight">Protetto</span>
+                  </div>
+                </div>
+              </div>
+
               <form onSubmit={handleSubmit} className="space-y-5">
 
                 <div className="shopify-section">
@@ -889,6 +920,18 @@ function CheckoutInner({
                       />
                     </div>
 
+                    {/* ✅ SPIEGAZIONE DATI */}
+                    <div className="p-3 bg-blue-50 border border-blue-100 rounded-md">
+                      <p className="text-xs text-gray-600 flex items-start gap-2">
+                        <svg className="w-3.5 h-3.5 text-blue-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                        </svg>
+                        <span className="leading-relaxed">
+                          <strong className="font-medium text-gray-900">Perché questi dati?</strong> Servono per garantire la consegna del tuo ordine. Non condividiamo i tuoi dati.
+                        </span>
+                      </p>
+                    </div>
+
                     <div className="flex items-start gap-2">
                       <input 
                         type="checkbox" 
@@ -902,7 +945,6 @@ function CheckoutInner({
                   </div>
                 </div>
 
-                {/* ✅ CHECKBOX INDIRIZZO FATTURAZIONE DIVERSO */}
                 <div className="flex items-start gap-2 p-4 bg-gray-50 rounded-md border border-gray-200">
                   <input 
                     type="checkbox" 
@@ -916,7 +958,6 @@ function CheckoutInner({
                   </label>
                 </div>
 
-                {/* ✅ FORM INDIRIZZO FATTURAZIONE (CONDIZIONALE) */}
                 {useDifferentBilling && (
                   <div className="shopify-section">
                     <h2 className="shopify-section-title">Fatturazione</h2>
@@ -1043,16 +1084,56 @@ function CheckoutInner({
                   </div>
                 )}
 
+                {/* ✅ SOCIAL PROOF prima pagamento */}
+                {isFormValid() && (
+                  <div className="bg-green-50 border border-green-200 rounded-md p-3 flex items-center gap-2.5">
+                    <div className="flex -space-x-1.5">
+                      <div className="w-7 h-7 rounded-full bg-gray-300 border-2 border-white"></div>
+                      <div className="w-7 h-7 rounded-full bg-gray-400 border-2 border-white"></div>
+                      <div className="w-7 h-7 rounded-full bg-gray-500 border-2 border-white"></div>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-xs text-gray-900 font-medium leading-tight">
+                        ✓ Oltre 2.000+ clienti soddisfatti questo mese
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Pagamento</h2>
                   <p className="text-xs text-gray-600 mb-4">
                     Tutte le transazioni sono sicure e crittografate.
                   </p>
+
+                  {/* ✅ LOGHI PAGAMENTI */}
+                  <div className="flex items-center gap-2 mb-3 pb-3 border-b border-gray-200">
+                    <span className="text-xs text-gray-600">Accettiamo:</span>
+                    <div className="flex items-center gap-1">
+                      <div className="h-5 px-1.5 bg-white border border-gray-200 rounded flex items-center">
+                        <span className="text-[9px] font-semibold text-gray-700">VISA</span>
+                      </div>
+                      <div className="h-5 px-1.5 bg-white border border-gray-200 rounded flex items-center">
+                        <span className="text-[9px] font-semibold text-gray-700">MC</span>
+                      </div>
+                      <div className="h-5 px-1.5 bg-white border border-gray-200 rounded flex items-center">
+                        <span className="text-[9px] font-semibold text-gray-700">AMEX</span>
+                      </div>
+                      <div className="h-5 px-1.5 bg-white border border-gray-200 rounded flex items-center">
+                        <span className="text-[9px] font-semibold">
+                          <span className="text-[#003087]">Pay</span><span className="text-[#009cde]">Pal</span>
+                        </span>
+                      </div>
+                      <div className="h-5 px-1.5 bg-white border border-gray-200 rounded flex items-center">
+                        <span className="text-[9px] font-semibold text-gray-700">GPay</span>
+                      </div>
+                    </div>
+                  </div>
                   
                   {isCalculatingShipping && (
                     <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-md mb-4">
                       <svg className="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                       </svg>
                       <p className="text-sm text-blue-800">Calcolo in corso...</p>
@@ -1113,18 +1194,42 @@ function CheckoutInner({
                   </div>
                 )}
 
+                {/* ✅ BOTTONE EMOZIONALE */}
                 <button
                   type="submit"
                   disabled={loading || !stripe || !elements || !clientSecret || isCalculatingShipping}
-                  className="shopify-btn"
+                  className="shopify-btn flex items-center justify-center gap-2"
                 >
-                  {loading ? "Elaborazione in corso..." : `Paga ora`}
+                  {loading ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span>Elaborazione...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                      </svg>
+                      <span>Completa l&apos;ordine in sicurezza</span>
+                    </>
+                  )}
                 </button>
+
+                <p className="text-xs text-center text-gray-500 flex items-center justify-center gap-1">
+                  <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                  </svg>
+                  Pagamento protetto SSL e 3D Secure
+                </p>
               </form>
             </div>
 
+            {/* SUMMARY COLUMN */}
             <div className="hidden lg:block">
-              <div className="sticky top-8">
+              <div className="sticky top-24">
                 <div className="shopify-section">
                   <div className="space-y-4 mb-6">
                     {cart.items.map((item, idx) => (
