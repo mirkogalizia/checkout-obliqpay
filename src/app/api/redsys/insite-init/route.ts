@@ -1,7 +1,7 @@
 export const runtime = "nodejs"
 
 import { NextResponse } from "next/server"
-import { createRedsysAPI, SANDBOX_URLS, PRODUCTION_URLS } from "redsys-easy"
+import { createRedsysAPI, SANDBOX_URLS, PRODUCTION_URLS, type RedirectInputParams } from "redsys-easy"
 
 function makeOrderId(sessionId: string) {
   const timestamp = Date.now().toString()
@@ -39,19 +39,18 @@ export async function POST(req: Request) {
 
     const orderId = makeOrderId(sessionId)
 
-    // ✅ Parametri per InSite (iframe carta)
-    const params = {
+    // ✅ Usa i tipi corretti con type assertion
+    const params: RedirectInputParams = {
       DS_MERCHANT_AMOUNT: String(amountCents),
       DS_MERCHANT_ORDER: orderId,
       DS_MERCHANT_MERCHANTCODE: merchantCode,
-      DS_MERCHANT_CURRENCY: "978", // EUR
+      DS_MERCHANT_CURRENCY: "978" as any, // ✅ Type assertion per EUR
       DS_MERCHANT_TRANSACTIONTYPE: "0" as const,
       DS_MERCHANT_TERMINAL: terminal,
       DS_MERCHANT_MERCHANTURL: `${process.env.NEXT_PUBLIC_APP_URL}/api/redsys/notification`,
       DS_MERCHANT_URLOK: `${process.env.NEXT_PUBLIC_APP_URL}/thank-you`,
       DS_MERCHANT_URLKO: `${process.env.NEXT_PUBLIC_APP_URL}/checkout?payment=failed`,
-      // ✅ InSite specifico
-      DS_MERCHANT_PAYMETHODS: "C", // Solo carta
+      DS_MERCHANT_PAYMETHODS: "C" as any, // ✅ Solo carta
     }
 
     const { body: formData } = redsysAPI.createRedirectForm(params)
