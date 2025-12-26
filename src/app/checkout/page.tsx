@@ -138,24 +138,36 @@ function RedsysInsite({
           document.body.appendChild(s)
         })
 
-        // 3) Setup callbacks globali
+        // 3) Setup listener per ricevere idOper
         const win: any = window
         
         if (!win?.getInSiteForm) {
           throw new Error("getInSiteForm non trovato su window")
         }
 
-        // Callback per ricevere token
-        win.storeIdOper = (idOper: string) => {
+        // ✅ Listener per ricevere idOper quando utente compila form
+        win.addEventListener('message', function(event: MessageEvent) {
           if (!mountedRef.current) return
-          console.log("✅ Token Redsys ricevuto:", idOper)
+          
+          // Redsys invia message con idOper
+          if (event.data && typeof event.data === 'string') {
+            const idOper = event.data
+            console.log("✅ idOper ricevuto:", idOper)
+            onReadyToken(idOper)
+          }
+        })
+
+        // Callback alternativa (vecchia API)
+        win.storeIdOper = function(idOper: string) {
+          if (!mountedRef.current) return
+          console.log("✅ Token Redsys ricevuto (callback):", idOper)
           if (typeof idOper === "string" && idOper.length > 0) {
             onReadyToken(idOper)
           }
         }
 
         // Callback errori
-        win.errorFunction = (msg: string) => {
+        win.errorFunction = function(msg: string) {
           if (!mountedRef.current) return
           console.error("❌ Errore Redsys:", msg)
           onError(msg || "Errore Redsys")
@@ -165,20 +177,20 @@ function RedsysInsite({
         const container = document.getElementById("redsys_container")
         if (container) container.innerHTML = ""
 
-        // 4) ✅ CHIAMATA CORRETTA secondo documentazione Redsys
-        console.log("📝 Chiamata getInSiteForm con parametri diretti")
+        // 4) ✅ CHIAMATA CORRETTA con parametri SEPARATI (non oggetto!)
+        console.log("📝 Chiamata getInSiteForm con parametri separati")
         win.getInSiteForm(
           'redsys_container',  // id container
-          '',                  // CSS button (vuoto = default)
-          '',                  // CSS body (vuoto = default)
-          '',                  // CSS box (vuoto = default)
-          '',                  // CSS inputs (vuoto = default)
+          '',                  // estiloBoton (vuoto = default)
+          '',                  // estiloBody (vuoto = default)
+          '',                  // estiloCaja (vuoto = default)
+          '',                  // estiloInputs (vuoto = default)
           'Pagar',             // testo bottone
-          initData.fuc,        // merchant code
-          initData.terminal,   // terminal
-          initData.orderId,    // order id
-          'ES',                // lingua
-          true                 // mostra logo Redsys
+          initData.fuc,        // ✅ FUC come STRINGA
+          initData.terminal,   // ✅ Terminal come STRINGA
+          initData.orderId,    // ✅ OrderId come STRINGA
+          'IT',                // lingua
+          true                 // mostra logo
         )
 
         if (mountedRef.current) setLoading(false)

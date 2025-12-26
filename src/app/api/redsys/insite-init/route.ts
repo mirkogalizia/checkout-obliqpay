@@ -34,12 +34,10 @@ export async function POST(req: Request) {
 
     console.log("✅ InSite init:", { orderId, amount: amountCents, env: isProduction ? 'PROD' : 'TEST' })
 
-    // ✅ Parametri DIRETTI per getInSiteForm
     return NextResponse.json({
       fuc: merchantCode,
       terminal,
       orderId,
-      amountCents: String(amountCents),
       scriptUrl: isProduction 
         ? "https://sis.redsys.es/sis/NC/redsysV3.js"
         : "https://sis-t.redsys.es:25443/sis/NC/sandbox/redsysV3.js",

@@ -1,163 +1,97 @@
 export const runtime = "nodejs"
 
 import { NextResponse } from "next/server"
-import { db } from "@/lib/firebaseAdmin"
-import { getConfig } from "@/lib/config"  // ✅ Usa la tua lib
-import { createRedsysAPI, SANDBOX_URLS, PRODUCTION_URLS } from "redsys-easy"
+import crypto from "crypto"
+
+function makeOrderId(sessionId: string) {
+  const timestamp = Date.now().toString()
+  const numPart = timestamp.slice(-4)
+  const alphaPart = sessionId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) || timestamp.slice(-8)
+  return `${numPart}${alphaPart}`.slice(0, 12)
+}
 
 export async function POST(req: Request) {
   try {
     const body = await req.json()
     const { sessionId, amountCents, idOper, customer, billing } = body
 
-    if (!sessionId || !idOper || !customer) {
+    if (!sessionId || !amountCents || !idOper) {
       return NextResponse.json({ 
-        error: "Dati mancanti" 
+        error: "Parametri mancanti" 
       }, { status: 400 })
     }
 
-    // 1) Recupera sessione carrello da Firebase
-    const cartSnap = await db.collection("cartSessions").doc(sessionId).get()
-    if (!cartSnap.exists) {
-      return NextResponse.json({ error: "Sessione non trovata" }, { status: 404 })
+    const merchantCode = process.env.REDSYS_MERCHANT_CODE!
+    const terminal = process.env.REDSYS_TERMINAL!
+    const secretKey = process.env.REDSYS_SECRET_KEY!
+    const isProduction = process.env.REDSYS_ENV === "prod"
+
+    const orderId = makeOrderId(sessionId)
+
+    // ✅ Parametri per trataPeticionREST con idOper
+    const params = {
+      DS_MERCHANT_AMOUNT: String(amountCents),
+      DS_MERCHANT_ORDER: orderId,
+      DS_MERCHANT_MERCHANTCODE: merchantCode,
+      DS_MERCHANT_CURRENCY: "978",
+      DS_MERCHANT_TRANSACTIONTYPE: "0",
+      DS_MERCHANT_TERMINAL: terminal,
+      DS_MERCHANT_IDOPER: idOper,  // ✅ Usa idOper!
     }
 
-    const cartData = cartSnap.data()!
+    console.log("💳 Autorizzazione REST con idOper:", { orderId, idOper })
 
-    console.log("💳 Pagamento Redsys:", {
-      sessionId,
-      orderId: idOper,
-      amount: amountCents,
-      customer: customer.email,
+    // Firma
+    const paramsBase64 = Buffer.from(JSON.stringify(params)).toString('base64')
+    const decodedKey = Buffer.from(secretKey, 'base64')
+    const cipher = crypto.createCipheriv('des-ede3-cbc', decodedKey, Buffer.alloc(8, 0))
+    const keyEncrypted = cipher.update(orderId, 'utf8', 'base64') + cipher.final('base64')
+    const hmac = crypto.createHmac('sha256', Buffer.from(keyEncrypted, 'base64'))
+    const signature = hmac.update(paramsBase64).digest('base64')
+
+    // ✅ Chiamata REST trataPeticion
+    const restUrl = isProduction
+      ? "https://sis.redsys.es/sis/rest/trataPeticionREST"
+      : "https://sis-t.redsys.es:25443/sis/rest/trataPeticionREST"
+
+    const restResponse = await fetch(restUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        Ds_SignatureVersion: "HMAC_SHA256_V1",
+        Ds_MerchantParameters: paramsBase64,
+        Ds_Signature: signature,
+      }),
     })
 
-    // 2) ✅ Recupera config Shopify da Firebase (struttura corretta)
-    const config = await getConfig()
-    const shopDomain = config.shopify?.shopDomain  // ✅ Corretto
-    const accessToken = config.shopify?.adminToken  // ✅ Corretto
+    const restData = await restResponse.json()
 
-    // 3) ✅ Crea ordine in Shopify (se configurato)
-    let shopifyOrderId = null
-    let shopifyOrderNumber = null
+    if (!restResponse.ok || restData.errorCode) {
+      throw new Error(restData?.errorCode || "Errore autorizzazione")
+    }
 
-    if (shopDomain && accessToken && cartData.rawCart?.id) {
-      try {
-        const shopifyOrder = await createShopifyOrder({
-          shopDomain,
-          accessToken,
-          cartId: cartData.rawCart.id,
-          customer,
-          billing: billing || customer,
-          totalCents: amountCents,
-        })
-        shopifyOrderId = shopifyOrder.id
-        shopifyOrderNumber = shopifyOrder.orderNumber
-        
-        console.log("✅ Ordine Shopify creato:", shopifyOrderNumber)
-      } catch (err: any) {
-        console.error("⚠️ Errore creazione ordine Shopify:", err)
-        // Continua comunque per non bloccare il pagamento
-      }
-    } else {
-      console.warn("⚠️ Shopify non configurato o cartId mancante", {
-        hasShopDomain: !!shopDomain,
-        hasAccessToken: !!accessToken,
-        hasCartId: !!cartData.rawCart?.id
+    // Decodifica risposta
+    const responseParams = JSON.parse(
+      Buffer.from(restData.Ds_MerchantParameters, 'base64').toString('utf8')
+    )
+
+    console.log("✅ Risposta Redsys:", responseParams.Ds_Response)
+
+    if (responseParams.Ds_Response === "0000") {
+      // ✅ Pagamento OK
+      return NextResponse.json({ 
+        ok: true,
+        orderId,
+        authCode: responseParams.Ds_AuthorisationCode,
       })
+    } else {
+      throw new Error(`Pagamento rifiutato: ${responseParams.Ds_Response}`)
     }
 
-    // 4) ✅ Aggiorna Firebase con ordine completato
-    await db.collection("cartSessions").doc(sessionId).update({
-      status: "completed",
-      paymentMethod: "redsys",
-      redsysIdOper: idOper,
-      customer,
-      billing: billing || customer,
-      completedAt: new Date().toISOString(),
-      shopifyOrderId,
-      shopifyOrderNumber,
-      totalPaidCents: amountCents,
-    })
-
-    // 5) ✅ Salva ordine separato in collection orders
-    await db.collection("orders").add({
-      sessionId,
-      orderId: idOper,
-      paymentMethod: "redsys",
-      status: "paid",
-      amountCents,
-      currency: "EUR",
-      customer,
-      billing: billing || customer,
-      items: cartData.items || [],
-      shopifyOrderId,
-      shopifyOrderNumber,
-      shopDomain,
-      createdAt: new Date().toISOString(),
-    })
-
-    // 6) TODO: Invia email conferma
-    // await sendOrderConfirmationEmail(customer.email, { orderId: idOper, ... })
-
-    return NextResponse.json({
-      ok: true,
-      orderId: idOper,
-      shopifyOrderNumber,
-    })
   } catch (e: any) {
     console.error("❌ Errore pagamento:", e)
     return NextResponse.json({ 
       error: e.message || "Errore pagamento" 
     }, { status: 500 })
-  }
-}
-
-// ✅ Helper per creare ordine Shopify
-async function createShopifyOrder(data: {
-  shopDomain: string
-  accessToken: string
-  cartId: string
-  customer: any
-  billing: any
-  totalCents: number
-}) {
-  const response = await fetch(`https://${data.shopDomain}/admin/api/2024-10/graphql.json`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": data.accessToken,
-    },
-    body: JSON.stringify({
-      query: `
-        mutation cartSubmit($cartId: ID!) {
-          cartSubmit(cartId: $cartId) {
-            job {
-              id
-            }
-            userErrors {
-              field
-              message
-            }
-          }
-        }
-      `,
-      variables: {
-        cartId: data.cartId,
-      },
-    }),
-  })
-
-  const result = await response.json()
-
-  if (result.errors || result.data?.cartSubmit?.userErrors?.length) {
-    throw new Error(
-      result.data?.cartSubmit?.userErrors[0]?.message || 
-      "Errore creazione ordine Shopify"
-    )
-  }
-
-  return {
-    id: result.data.cartSubmit.job.id,
-    orderNumber: null, // Viene assegnato dopo dal webhook
   }
 }
