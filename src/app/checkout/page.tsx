@@ -87,6 +87,7 @@ function RedsysInsite({
 }) {
   const [loading, setLoading] = useState(true)
   const mountedRef = useRef(false)
+  const initializedRef = useRef(false) // ✅ Previene re-init multipli
 
   useEffect(() => {
     mountedRef.current = true
@@ -96,33 +97,32 @@ function RedsysInsite({
   }, [])
 
   useEffect(() => {
+    // ✅ Skip se già inizializzato
+    if (initializedRef.current) {
+      console.log("⚠️ InSite già inizializzato, skip")
+      return
+    }
+    initializedRef.current = true
+
     async function boot() {
       try {
         setLoading(true)
 
-        // 1) Ottieni parametri dall'API
         const initRes = await fetch("/api/redsys/insite-init", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId,
-            amountCents,
-            email: customerEmail,
-          }),
+          body: JSON.stringify({ sessionId, amountCents, email: customerEmail }),
         })
         const initData = await initRes.json()
 
-        if (!initRes.ok || !initData?.fuc || !initData?.terminal || !initData?.orderId) {
-          throw new Error(initData?.error || "Init Redsys fallito")
-        }
+        if (!initRes.ok || !initData?.fuc) throw new Error(initData?.error || "Init fallito")
 
-        console.log("✅ Parametri Redsys ricevuti:", initData.orderId)
-        console.log("✅ Script URL:", initData.scriptUrl)
+        console.log("✅ Parametri:", initData.orderId)
 
-        // 2) Carica script Redsys
+        // Carica script
         await new Promise<void>((resolve, reject) => {
           if (document.getElementById("redsys-v3")) {
-            console.log("ℹ️ Script Redsys già caricato")
+            console.log("ℹ️ Script già caricato")
             return resolve()
           }
           
@@ -131,80 +131,74 @@ function RedsysInsite({
           s.src = initData.scriptUrl
           s.async = true
           s.onload = () => {
-            console.log("✅ Redsys script caricato:", initData.scriptUrl)
+            console.log("✅ Script caricato")
             resolve()
           }
-          s.onerror = () => reject(new Error(`Impossibile caricare ${initData.scriptUrl}`))
+          s.onerror = () => reject(new Error("Script load error"))
           document.body.appendChild(s)
         })
 
-        // 3) Setup listener per ricevere idOper
+        // ✅ ASPETTA che getInSiteForm sia disponibile
+        let attempts = 0
+        while (attempts < 50) {
+          if ((window as any).getInSiteForm) {
+            console.log("✅ getInSiteForm disponibile")
+            break
+          }
+          await new Promise(r => setTimeout(r, 100))
+          attempts++
+        }
+
         const win: any = window
         
         if (!win?.getInSiteForm) {
-          throw new Error("getInSiteForm non trovato su window")
+          throw new Error("getInSiteForm timeout")
         }
 
-        // ✅ Listener per ricevere idOper quando utente compila form
-        win.addEventListener('message', function(event: MessageEvent) {
-          if (!mountedRef.current) return
-          
-          // Redsys invia message con idOper
-          if (event.data && typeof event.data === 'string') {
-            const idOper = event.data
-            console.log("✅ idOper ricevuto:", idOper)
-            onReadyToken(idOper)
-          }
-        })
-
-        // Callback alternativa (vecchia API)
+        // Callbacks
         win.storeIdOper = function(idOper: string) {
           if (!mountedRef.current) return
-          console.log("✅ Token Redsys ricevuto (callback):", idOper)
-          if (typeof idOper === "string" && idOper.length > 0) {
-            onReadyToken(idOper)
-          }
+          console.log("✅ idOper:", idOper)
+          if (idOper?.length > 0) onReadyToken(idOper)
         }
 
-        // Callback errori
         win.errorFunction = function(msg: string) {
           if (!mountedRef.current) return
-          console.error("❌ Errore Redsys:", msg)
+          console.error("❌ Errore:", msg)
           onError(msg || "Errore Redsys")
         }
 
-        // Pulizia container
         const container = document.getElementById("redsys_container")
         if (container) container.innerHTML = ""
 
-        // 4) ✅ CHIAMATA CORRETTA con parametri SEPARATI (non oggetto!)
-        console.log("📝 Chiamata getInSiteForm con parametri separati")
+        console.log("📝 Chiamata getInSiteForm")
+        
         win.getInSiteForm(
-          'redsys_container',  // id container
-          '',                  // estiloBoton (vuoto = default)
-          '',                  // estiloBody (vuoto = default)
-          '',                  // estiloCaja (vuoto = default)
-          '',                  // estiloInputs (vuoto = default)
-          'Pagar',             // testo bottone
-          initData.fuc,        // ✅ FUC come STRINGA
-          initData.terminal,   // ✅ Terminal come STRINGA
-          initData.orderId,    // ✅ OrderId come STRINGA
-          'IT',                // lingua
-          true                 // mostra logo
+          'redsys_container',
+          '',
+          '',
+          '',
+          '',
+          'Pagar',
+          initData.fuc,
+          initData.terminal,
+          initData.orderId,
+          'IT',
+          true
         )
 
         if (mountedRef.current) setLoading(false)
       } catch (e: any) {
-        console.error("❌ Errore boot Redsys:", e)
+        console.error("❌ Errore:", e)
         if (mountedRef.current) {
           setLoading(false)
-          onError(e?.message || "Errore Redsys inSite")
+          onError(e?.message || "Errore Redsys")
         }
       }
     }
 
     boot()
-  }, [sessionId, amountCents, customerEmail, onReadyToken, onError])
+  }, []) // ✅ Dipendenze VUOTE - esegue UNA volta sola
 
   return (
     <div className="border border-gray-300 rounded-xl p-4 bg-white shadow-sm mb-4">
