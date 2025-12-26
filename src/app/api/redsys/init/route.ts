@@ -25,9 +25,10 @@ export async function POST(req: Request) {
     const secretKey = process.env.REDSYS_SECRET_KEY!
     const isProduction = process.env.REDSYS_ENV === "prod"
     
-    // ✅ Usa la libreria ufficiale
+    // ✅ Configurazione corretta con urls
     const redsysAPI = createRedsysAPI({
       secretKey,
+      urls: isProduction ? PRODUCTION_URLS : SANDBOX_URLS,
     })
     
     const orderId = makeOrderId(sessionId)
@@ -44,14 +45,16 @@ export async function POST(req: Request) {
       DS_MERCHANT_URLKO: "https://checkout-app-redsys-git-main-mario-potabiles-projects.vercel.app/checkout?payment=failed",
     }
 
-    // ✅ La libreria gestisce encoding e firma automaticamente
+    // ✅ Genera form redirect
     const { body: formData } = redsysAPI.createRedirectForm(merchantParams)
 
     return NextResponse.json({
       ok: true,
       redsys: {
         url: isProduction ? PRODUCTION_URLS.redirect : SANDBOX_URLS.redirect,
-        ...formData,
+        Ds_SignatureVersion: formData.Ds_SignatureVersion,
+        Ds_MerchantParameters: formData.Ds_MerchantParameters,
+        Ds_Signature: formData.Ds_Signature,
         orderId,
       },
     })
