@@ -3,7 +3,7 @@ export const runtime = "nodejs"
 import { NextResponse } from "next/server"
 import crypto from "crypto"
 
-// ✅ BASE64 STANDARD (non url-safe)
+/** Base64 STANDARD (non url-safe) */
 function b64Encode(buf: Buffer) {
   return buf.toString("base64")
 }
@@ -14,11 +14,16 @@ function b64DecodeToBuffer(b64: string) {
   return Buffer.from(b64, "base64")
 }
 
+/**
+ * Redsys signature:
+ * - Deriva key 3DES cifrando order (padded a blocchi 8, zero padding) con secretKey (Base64)
+ * - HMAC-SHA256 su MerchantParameters decoded (base64 -> bytes)
+ * - Output: Base64 STANDARD (non url-safe)
+ */
 function redsysSignature(merchantParamsB64: string, order: string, secretKeyB64: string) {
-  const secretKey = Buffer.from(secretKeyB64, "base64") // la "clave" Redsys è base64
+  const secretKey = Buffer.from(secretKeyB64, "base64")
   const iv = Buffer.alloc(8, 0)
 
-  // 3DES-CBC su order (padded a 8 con 0x00)
   const orderBuf = Buffer.from(order, "utf8")
   const padLen = (8 - (orderBuf.length % 8)) % 8
   const orderPadded = padLen ? Buffer.concat([orderBuf, Buffer.alloc(padLen, 0)]) : orderBuf
@@ -27,24 +32,25 @@ function redsysSignature(merchantParamsB64: string, order: string, secretKeyB64:
   cipher.setAutoPadding(false)
   const key3DES = Buffer.concat([cipher.update(orderPadded), cipher.final()])
 
-  // HMAC-SHA256( merchantParams decoded )
   const hmac = crypto.createHmac("sha256", key3DES)
-  hmac.update(b64DecodeToBuffer(merchantParamsB64))
-
-  // ✅ Redsys si aspetta signature in base64 standard
-  return b64Encode(hmac.digest())
+  hmac.update(b64DecodeToBuffer(merchantParamsB64)) // bytes reali dei params
+  return b64Encode(hmac.digest()) // Base64 standard
 }
 
 function getRedsysFormUrl() {
   const env = (process.env.REDSYS_ENV || "test").toLowerCase()
-  return env === "prod" ? "https://sis.redsys.es/sis/realizarPago" : "https://sis-t.redsys.es:25443/sis/realizarPago"
+  return env === "prod"
+    ? "https://sis.redsys.es/sis/realizarPago"
+    : "https://sis-t.redsys.es:25443/sis/realizarPago"
 }
 
+/** ORDER: deve essere 4-12 caratteri, tipicamente NUMERICO. Qui: 12 cifre sempre. */
 function makeOrderId(sessionId: string) {
-  // Redsys: tipicamente 4-12 char alfanumerici (dipende dal banco), stiamo safe a 12
-  const clean = sessionId.replace(/[^a-zA-Z0-9]/g, "")
-  const tail = clean.slice(-11) || String(Date.now()).slice(-11)
-  return `C${tail}`.slice(0, 12)
+  const digits = String(sessionId || "").replace(/\D/g, "")
+  const fallback = String(Date.now()).replace(/\D/g, "")
+  const base = (digits.length >= 4 ? digits : fallback)
+  // ultimi 12 digit, padded se serve
+  return base.slice(-12).padStart(12, "0")
 }
 
 export async function POST(req: Request) {
@@ -73,7 +79,7 @@ export async function POST(req: Request) {
     const merchantUrl = process.env.REDSYS_NOTIFICATION_URL || "http://localhost:3000/api/redsys/notification"
 
     const params = {
-      DS_MERCHANT_AMOUNT: String(amountCents),
+      DS_MERCHANT_AMOUNT: String(Math.trunc(amountCents)),
       DS_MERCHANT_ORDER: orderId,
       DS_MERCHANT_MERCHANTCODE: merchantCode,
       DS_MERCHANT_CURRENCY: currency,
@@ -88,8 +94,9 @@ export async function POST(req: Request) {
       DS_MERCHANT_PRODUCTDESCRIPTION: "Ordine ecommerce",
     }
 
-    // ✅ merchant params = base64(JSON)
+    // 👇 Base64 STANDARD
     const dsMerchantParameters = b64EncodeFromString(JSON.stringify(params))
+    // 👇 Firma Base64 STANDARD
     const dsSignature = redsysSignature(dsMerchantParameters, orderId, secretKey)
 
     return NextResponse.json({
@@ -100,6 +107,7 @@ export async function POST(req: Request) {
         Ds_MerchantParameters: dsMerchantParameters,
         Ds_Signature: dsSignature,
         orderId,
+        params, // utile per debug
       },
     })
   } catch (e: any) {
