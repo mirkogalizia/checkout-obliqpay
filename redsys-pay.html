@@ -1,0 +1,11 @@
+<!doctype html>
+<html>
+  <body onload="document.forms[0].submit()">
+    <form method="POST" action="https://sis-t.redsys.es:25443/sis/realizarPago">
+      <input type="hidden" name="Ds_SignatureVersion" value="HMAC_SHA256_V1" />
+      <input type="hidden" name="Ds_MerchantParameters" value="INCOLLA_QUI_Ds_MerchantParameters" />
+      <input type="hidden" name="Ds_Signature" value="INCOLLA_QUI_Ds_Signature" />
+      <noscript><button type="submit">Paga</button></noscript>
+    </form>
+  </body>
+</html>
