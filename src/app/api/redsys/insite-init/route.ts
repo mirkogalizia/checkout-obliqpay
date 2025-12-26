@@ -1,7 +1,6 @@
 export const runtime = "nodejs"
 
 import { NextResponse } from "next/server"
-import { createRedsysAPI, SANDBOX_URLS, PRODUCTION_URLS, type RedirectInputParams } from "redsys-easy"
 
 function makeOrderId(sessionId: string) {
   const timestamp = Date.now().toString()
@@ -23,46 +22,39 @@ export async function POST(req: Request) {
 
     const merchantCode = process.env.REDSYS_MERCHANT_CODE!
     const terminal = process.env.REDSYS_TERMINAL!
-    const secretKey = process.env.REDSYS_SECRET_KEY!
     const isProduction = process.env.REDSYS_ENV === "prod"
 
-    if (!merchantCode || !terminal || !secretKey) {
+    if (!merchantCode || !terminal) {
       return NextResponse.json({ 
         error: "Configurazione Redsys mancante" 
       }, { status: 500 })
     }
 
-    const redsysAPI = createRedsysAPI({
-      secretKey,
-      urls: isProduction ? PRODUCTION_URLS : SANDBOX_URLS,
-    })
-
     const orderId = makeOrderId(sessionId)
 
-    const params: RedirectInputParams = {
+    // ✅ PARAMETRI RAW per InSite (NON Base64!)
+    const params = {
       DS_MERCHANT_AMOUNT: String(amountCents),
       DS_MERCHANT_ORDER: orderId,
       DS_MERCHANT_MERCHANTCODE: merchantCode,
-      DS_MERCHANT_CURRENCY: "978" as any,
-      DS_MERCHANT_TRANSACTIONTYPE: "0" as const,
+      DS_MERCHANT_CURRENCY: "978",
+      DS_MERCHANT_TRANSACTIONTYPE: "0",
       DS_MERCHANT_TERMINAL: terminal,
       DS_MERCHANT_MERCHANTURL: `${process.env.NEXT_PUBLIC_APP_URL}/api/redsys/notification`,
       DS_MERCHANT_URLOK: `${process.env.NEXT_PUBLIC_APP_URL}/thank-you`,
       DS_MERCHANT_URLKO: `${process.env.NEXT_PUBLIC_APP_URL}/checkout?payment=failed`,
-      DS_MERCHANT_PAYMETHODS: "C" as any,
+      DS_MERCHANT_PAYMETHODS: "C",
     }
-
-    const { body: formData } = redsysAPI.createRedirectForm(params)
 
     console.log("✅ InSite init:", { orderId, amount: amountCents, env: isProduction ? 'PROD' : 'TEST' })
 
-    // ✅ URL CORRETTI da documentazione ufficiale Redsys
+    // ✅ Ritorna parametri RAW + scriptUrl
     return NextResponse.json({
-      ...formData,
+      params,  // ✅ Oggetto JSON diretto, NON Base64
       orderId,
       scriptUrl: isProduction 
-        ? "https://sis.redsys.es/sis/NC/redsysV3.js"  // ✅ PROD con /NC/
-        : "https://sis-t.redsys.es:25443/sis/NC/sandbox/redsysV3.js",  // ✅ TEST con /NC/sandbox/
+        ? "https://sis.redsys.es/sis/NC/redsysV3.js"
+        : "https://sis-t.redsys.es:25443/sis/NC/sandbox/redsysV3.js",
     })
   } catch (e: any) {
     console.error("❌ Errore insite-init:", e)

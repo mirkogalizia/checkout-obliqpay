@@ -100,7 +100,7 @@ function RedsysInsite({
       try {
         setLoading(true)
 
-        // 1) ✅ Prima ottieni parametri firmati E scriptUrl dall'API
+        // 1) ✅ Ottieni parametri RAW (non Base64)
         const initRes = await fetch("/api/redsys/insite-init", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -112,18 +112,15 @@ function RedsysInsite({
         })
         const initData = await initRes.json()
 
-        if (!initRes.ok || !initData?.Ds_MerchantParameters || !initData?.Ds_Signature) {
+        // ✅ CAMBIATO: cerchiamo `params` invece di `Ds_MerchantParameters`
+        if (!initRes.ok || !initData?.params || !initData?.scriptUrl) {
           throw new Error(initData?.error || "Init Redsys fallito")
-        }
-
-        if (!initData.scriptUrl) {
-          throw new Error("Script URL mancante dalla risposta API")
         }
 
         console.log("✅ Parametri Redsys ricevuti:", initData.orderId)
         console.log("✅ Script URL:", initData.scriptUrl)
 
-        // 2) ✅ Carica script usando URL dall'API
+        // 2) Carica script
         await new Promise<void>((resolve, reject) => {
           if (document.getElementById("redsys-v3")) {
             console.log("ℹ️ Script Redsys già caricato")
@@ -132,28 +129,23 @@ function RedsysInsite({
           
           const s = document.createElement("script")
           s.id = "redsys-v3"
-          s.src = initData.scriptUrl  // ✅ Usa URL dall'API
+          s.src = initData.scriptUrl
           s.async = true
           s.onload = () => {
             console.log("✅ Redsys script caricato:", initData.scriptUrl)
             resolve()
           }
-          s.onerror = () => {
-            console.error("❌ Errore caricamento script:", initData.scriptUrl)
-            reject(new Error(`Impossibile caricare ${initData.scriptUrl}`))
-          }
+          s.onerror = () => reject(new Error(`Impossibile caricare ${initData.scriptUrl}`))
           document.body.appendChild(s)
         })
 
-        // 3) Monta iframe in container
+        // 3) Setup callbacks
         const win: any = window
         
-        if (!win?.getInSiteForm && !win?.createInSiteForm) {
-          console.error("❌ Metodi disponibili su window:", Object.keys(win).filter(k => k.toLowerCase().includes('redsys')))
-          throw new Error("RedsysV3 metodo InSite non trovato. Verifica documentazione Redsys.")
+        if (!win?.getInSiteForm) {
+          throw new Error("getInSiteForm non trovato. Verifica configurazione Redsys.")
         }
 
-        // Callback globale per ricevere idOper
         win.storeIdOper = (idOper: string) => {
           if (!mountedRef.current) return
           console.log("✅ Token Redsys ricevuto:", idOper)
@@ -162,7 +154,6 @@ function RedsysInsite({
           }
         }
 
-        // Callback errori
         win.errorFunction = (msg: string) => {
           if (!mountedRef.current) return
           console.error("❌ Errore Redsys:", msg)
@@ -173,26 +164,9 @@ function RedsysInsite({
         const container = document.getElementById("redsys_container")
         if (container) container.innerHTML = ""
 
-        // ✅ Prova diversi metodi API Redsys (varia tra versioni)
-        if (typeof win.getInSiteForm === "function") {
-          console.log("📝 Usando getInSiteForm")
-          win.getInSiteForm(
-            initData.Ds_MerchantParameters,
-            initData.Ds_Signature,
-            initData.Ds_SignatureVersion || "HMAC_SHA256_V1",
-            "redsys_container"
-          )
-        } else if (typeof win.createInSiteForm === "function") {
-          console.log("📝 Usando createInSiteForm")
-          win.createInSiteForm(
-            "redsys_container",
-            initData.Ds_MerchantParameters,
-            initData.Ds_Signature,
-            initData.Ds_SignatureVersion || "HMAC_SHA256_V1"
-          )
-        } else {
-          throw new Error("Nessun metodo InSite disponibile. Contatta supporto Redsys.")
-        }
+        // ✅ CHIAVE: passa params DIRETTAMENTE (oggetto JSON, NON Base64)
+        console.log("📝 Chiamata getInSiteForm con params:", initData.params)
+        win.getInSiteForm(initData.params, "redsys_container")
 
         if (mountedRef.current) setLoading(false)
       } catch (e: any) {
@@ -221,6 +195,7 @@ function RedsysInsite({
     </div>
   )
 }
+
 
 
 function CheckoutInner({
