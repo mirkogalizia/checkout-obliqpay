@@ -32,26 +32,14 @@ export async function POST(req: Request) {
 
     const orderId = makeOrderId(sessionId)
 
-    // ✅ PARAMETRI RAW per InSite (NON Base64!)
-    const params = {
-      DS_MERCHANT_AMOUNT: String(amountCents),
-      DS_MERCHANT_ORDER: orderId,
-      DS_MERCHANT_MERCHANTCODE: merchantCode,
-      DS_MERCHANT_CURRENCY: "978",
-      DS_MERCHANT_TRANSACTIONTYPE: "0",
-      DS_MERCHANT_TERMINAL: terminal,
-      DS_MERCHANT_MERCHANTURL: `${process.env.NEXT_PUBLIC_APP_URL}/api/redsys/notification`,
-      DS_MERCHANT_URLOK: `${process.env.NEXT_PUBLIC_APP_URL}/thank-you`,
-      DS_MERCHANT_URLKO: `${process.env.NEXT_PUBLIC_APP_URL}/checkout?payment=failed`,
-      DS_MERCHANT_PAYMETHODS: "C",
-    }
-
     console.log("✅ InSite init:", { orderId, amount: amountCents, env: isProduction ? 'PROD' : 'TEST' })
 
-    // ✅ Ritorna parametri RAW + scriptUrl
+    // ✅ Parametri DIRETTI per getInSiteForm
     return NextResponse.json({
-      params,  // ✅ Oggetto JSON diretto, NON Base64
+      fuc: merchantCode,
+      terminal,
       orderId,
+      amountCents: String(amountCents),
       scriptUrl: isProduction 
         ? "https://sis.redsys.es/sis/NC/redsysV3.js"
         : "https://sis-t.redsys.es:25443/sis/NC/sandbox/redsysV3.js",

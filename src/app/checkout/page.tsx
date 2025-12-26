@@ -100,7 +100,7 @@ function RedsysInsite({
       try {
         setLoading(true)
 
-        // 1) ✅ Ottieni parametri RAW (non Base64)
+        // 1) Ottieni parametri dall'API
         const initRes = await fetch("/api/redsys/insite-init", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -112,15 +112,14 @@ function RedsysInsite({
         })
         const initData = await initRes.json()
 
-        // ✅ CAMBIATO: cerchiamo `params` invece di `Ds_MerchantParameters`
-        if (!initRes.ok || !initData?.params || !initData?.scriptUrl) {
+        if (!initRes.ok || !initData?.fuc || !initData?.terminal || !initData?.orderId) {
           throw new Error(initData?.error || "Init Redsys fallito")
         }
 
         console.log("✅ Parametri Redsys ricevuti:", initData.orderId)
         console.log("✅ Script URL:", initData.scriptUrl)
 
-        // 2) Carica script
+        // 2) Carica script Redsys
         await new Promise<void>((resolve, reject) => {
           if (document.getElementById("redsys-v3")) {
             console.log("ℹ️ Script Redsys già caricato")
@@ -139,13 +138,14 @@ function RedsysInsite({
           document.body.appendChild(s)
         })
 
-        // 3) Setup callbacks
+        // 3) Setup callbacks globali
         const win: any = window
         
         if (!win?.getInSiteForm) {
-          throw new Error("getInSiteForm non trovato. Verifica configurazione Redsys.")
+          throw new Error("getInSiteForm non trovato su window")
         }
 
+        // Callback per ricevere token
         win.storeIdOper = (idOper: string) => {
           if (!mountedRef.current) return
           console.log("✅ Token Redsys ricevuto:", idOper)
@@ -154,6 +154,7 @@ function RedsysInsite({
           }
         }
 
+        // Callback errori
         win.errorFunction = (msg: string) => {
           if (!mountedRef.current) return
           console.error("❌ Errore Redsys:", msg)
@@ -164,9 +165,21 @@ function RedsysInsite({
         const container = document.getElementById("redsys_container")
         if (container) container.innerHTML = ""
 
-        // ✅ CHIAVE: passa params DIRETTAMENTE (oggetto JSON, NON Base64)
-        console.log("📝 Chiamata getInSiteForm con params:", initData.params)
-        win.getInSiteForm(initData.params, "redsys_container")
+        // 4) ✅ CHIAMATA CORRETTA secondo documentazione Redsys
+        console.log("📝 Chiamata getInSiteForm con parametri diretti")
+        win.getInSiteForm(
+          'redsys_container',  // id container
+          '',                  // CSS button (vuoto = default)
+          '',                  // CSS body (vuoto = default)
+          '',                  // CSS box (vuoto = default)
+          '',                  // CSS inputs (vuoto = default)
+          'Pagar',             // testo bottone
+          initData.fuc,        // merchant code
+          initData.terminal,   // terminal
+          initData.orderId,    // order id
+          'ES',                // lingua
+          true                 // mostra logo Redsys
+        )
 
         if (mountedRef.current) setLoading(false)
       } catch (e: any) {
@@ -195,6 +208,7 @@ function RedsysInsite({
     </div>
   )
 }
+
 
 
 
