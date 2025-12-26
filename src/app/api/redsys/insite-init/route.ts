@@ -56,13 +56,13 @@ export async function POST(req: Request) {
 
     console.log("✅ InSite init:", { orderId, amount: amountCents, env: isProduction ? 'PROD' : 'TEST' })
 
-    // ✅ Aggiungi scriptUrl basato sull'environment
+    // ✅ URL CORRETTI da documentazione ufficiale Redsys
     return NextResponse.json({
       ...formData,
       orderId,
       scriptUrl: isProduction 
-        ? "https://sis.redsys.es/sis/redsysV3.js"
-        : "https://sis-t.redsys.es:25443/sis/redsysV3.js",
+        ? "https://sis.redsys.es/sis/NC/redsysV3.js"  // ✅ PROD con /NC/
+        : "https://sis-t.redsys.es:25443/sis/NC/sandbox/redsysV3.js",  // ✅ TEST con /NC/sandbox/
     })
   } catch (e: any) {
     console.error("❌ Errore insite-init:", e)
