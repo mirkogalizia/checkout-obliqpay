@@ -1,7 +1,7 @@
 export const runtime = "nodejs"
 
 import { NextResponse } from "next/server"
-import { createRedsysAPI, SANDBOX_URLS, PRODUCTION_URLS } from "redsys-easy"
+import { createRedsysAPI, SANDBOX_URLS, PRODUCTION_URLS, type RedirectInputParams } from "redsys-easy"
 
 function makeOrderId(sessionId: string) {
   const timestamp = Date.now().toString()
@@ -25,7 +25,6 @@ export async function POST(req: Request) {
     const secretKey = process.env.REDSYS_SECRET_KEY!
     const isProduction = process.env.REDSYS_ENV === "prod"
     
-    // ✅ Configurazione corretta con urls
     const redsysAPI = createRedsysAPI({
       secretKey,
       urls: isProduction ? PRODUCTION_URLS : SANDBOX_URLS,
@@ -33,19 +32,19 @@ export async function POST(req: Request) {
     
     const orderId = makeOrderId(sessionId)
     
-    const merchantParams = {
+    // ✅ Usa i tipi corretti della libreria
+    const merchantParams: RedirectInputParams = {
       DS_MERCHANT_AMOUNT: String(amountCents),
       DS_MERCHANT_ORDER: orderId,
       DS_MERCHANT_MERCHANTCODE: merchantCode,
       DS_MERCHANT_CURRENCY: "978",
-      DS_MERCHANT_TRANSACTIONTYPE: "0",
+      DS_MERCHANT_TRANSACTIONTYPE: "0" as const, // ✅ Type assertion
       DS_MERCHANT_TERMINAL: terminal,
       DS_MERCHANT_MERCHANTURL: "https://checkout-app-redsys-git-main-mario-potabiles-projects.vercel.app/api/redsys/notification",
       DS_MERCHANT_URLOK: "https://checkout-app-redsys-git-main-mario-potabiles-projects.vercel.app/thank-you",
       DS_MERCHANT_URLKO: "https://checkout-app-redsys-git-main-mario-potabiles-projects.vercel.app/checkout?payment=failed",
     }
 
-    // ✅ Genera form redirect
     const { body: formData } = redsysAPI.createRedirectForm(merchantParams)
 
     return NextResponse.json({
