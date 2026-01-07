@@ -61,16 +61,35 @@ export function middleware(request: NextRequest) {
     }
   }
 
+  // ✅ Content Security Policy per Obliqpay
+  const cspHeader = `
+    default-src 'self';
+    script-src 'self' 'unsafe-eval' 'unsafe-inline' https://sis-t.redsys.es:25443 https://sis.redsys.es https://maps.googleapis.com;
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' blob: data: https:;
+    font-src 'self' data:;
+    connect-src 'self' https://api.obliqpay.com https://v3.obliqpay.com;
+    frame-src 'self' https://sis-t.redsys.es https://sis.redsys.es https://v3.obliqpay.com;
+    object-src 'none';
+    base-uri 'self';
+    form-action 'self';
+  `.replace(/\s{2,}/g, ' ').trim()
+
   // ✅ CORS: Aggiungi header alla risposta
   const response = NextResponse.next()
   
   response.headers.set('Access-Control-Allow-Origin', isAllowedOrigin ? origin! : '*')
   response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
   response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  response.headers.set('Content-Security-Policy', cspHeader)
 
   return response
 }
 
 export const config = {
-  matcher: '/api/:path*',
+  matcher: [
+    '/api/:path*',
+    '/((?!_next/static|_next/image|favicon.ico).*)', // Applica CSP a tutte le pagine
+  ],
 }
+
