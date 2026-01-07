@@ -1,265 +1,128 @@
 // src/app/api/cart-session/route.ts
 import { NextRequest, NextResponse } from "next/server"
-import { randomUUID } from "crypto"
 import { db } from "@/lib/firebaseAdmin"
+import { getConfig } from "@/lib/config"
 
-const COLLECTION = "cartSessions"
-
-type ShopifyCartItem = {
-  id: number | string
-  title: string
-  quantity: number
-  price: number
-  line_price?: number
-  image?: string
-  variant_title?: string
-  token?: string
-}
-
-type ShopifyCart = {
-  items?: ShopifyCartItem[]
-  items_subtotal_price?: number
-  total_price?: number
-  currency?: string
-  token?: string
-}
-
-type CheckoutItem = {
-  id: string | number
-  title: string
-  quantity: number
-  priceCents: number
-  linePriceCents: number
-  image?: string
-  variantTitle?: string
-}
-
-function corsHeaders(origin: string | null) {
-  return {
-    "Access-Control-Allow-Origin": origin || "*",
-    "Access-Control-Allow-Methods": "POST,GET,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+// ✅ Funzione per rimuovere undefined/null da oggetti
+function cleanObject(obj: any): any {
+  if (Array.isArray(obj)) {
+    return obj.map(cleanObject).filter(item => item !== undefined && item !== null)
   }
-}
-
-export async function OPTIONS(req: NextRequest) {
-  const origin = req.headers.get("origin")
-  return new NextResponse(null, {
-    status: 204,
-    headers: corsHeaders(origin),
-  })
+  if (obj && typeof obj === 'object') {
+    const cleaned: any = {}
+    for (const key in obj) {
+      if (obj[key] !== undefined && obj[key] !== null) {
+        cleaned[key] = cleanObject(obj[key])
+      }
+    }
+    return cleaned
+  }
+  return obj
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const origin = req.headers.get("origin")
-    const body = await req.json().catch(() => null)
+    console.log("[cart-session POST] ✓ Request received")
+    
+    const body = await req.json()
+    const { cart } = body
 
-    if (!body || !body.cart) {
-      return new NextResponse(
-        JSON.stringify({ error: "Body non valido o cart mancante" }),
-        {
-          status: 400,
-          headers: {
-            "Content-Type": "application/json",
-            ...corsHeaders(origin),
-          },
-        },
-      )
+    if (!cart || !cart.items) {
+      return NextResponse.json({ error: "Invalid cart" }, { status: 400 })
     }
 
-    const cart: ShopifyCart = body.cart
+    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`
+    
+    console.log("[cart-session POST] 🔍 Getting config...")
+    const config = await getConfig()
+    const shopDomain = config.shopify?.shopDomain || "unknown"
 
-    const items: CheckoutItem[] = Array.isArray(cart.items)
-      ? cart.items.map(item => {
-          const quantity = Number(item.quantity ?? 0)
-          const priceCents = Number(item.price ?? 0)
-          const linePriceCents =
-            typeof item.line_price === "number"
-              ? item.line_price
-              : priceCents * quantity
+    console.log("[cart-session POST] 📦 Processing", cart.items.length, "items...")
+    
+    // ✅ Mappatura items con valori garantiti (no undefined)
+    const items = cart.items.map((item: any) => {
+      const priceEuros = Number(item.price || 0)
+      const linePriceEuros = Number(item.line_price || priceEuros * (item.quantity || 1))
+      
+      return {
+        id: String(item.id || ''),
+        variant_id: String(item.variant_id || ''),
+        product_id: String(item.product_id || ''),
+        title: item.title || 'Prodotto',
+        quantity: Number(item.quantity || 1),
+        price: priceEuros.toFixed(2),
+        line_price: linePriceEuros.toFixed(2),
+        priceCents: Math.round(priceEuros * 100),
+        linePriceCents: Math.round(linePriceEuros * 100),
+        image: item.image || ''
+      }
+    })
 
-          return {
-            id: item.id,
-            title: item.title,
-            quantity,
-            priceCents,
-            linePriceCents,
-            image: item.image,
-            variantTitle: item.variant_title,
-          }
-        })
-      : []
+    const subtotalEuros = Number(cart.items_subtotal_price || 0)
+    const totalEuros = Number(cart.total_price || 0)
+    const shippingEuros = Math.max(0, totalEuros - subtotalEuros)
 
-    const subtotalFromCart =
-      typeof cart.items_subtotal_price === "number"
-        ? cart.items_subtotal_price
-        : 0
-
-    const subtotalFromItems = items.reduce((sum, item) => {
-      return sum + (item.linePriceCents || 0)
-    }, 0)
-
-    const subtotalCents =
-      subtotalFromCart && subtotalFromCart > 0
-        ? subtotalFromCart
-        : subtotalFromItems
-
-    const shippingCents = 0
-
-    const totalCents =
-      typeof cart.total_price === "number" && cart.total_price > 0
-        ? cart.total_price
-        : subtotalCents + shippingCents
-
-    const currency = (cart.currency || "EUR").toString().toUpperCase()
-    const sessionId = randomUUID()
-
-    // ✅ Costruisci cartId da token
-    const cartId = cart.token ? `gid://shopify/Cart/${cart.token}` : undefined
+    const subtotalCents = Math.round(subtotalEuros * 100)
+    const shippingCents = Math.round(shippingEuros * 100)
+    const totalCents = Math.round(totalEuros * 100)
 
     const docData = {
       sessionId,
       createdAt: new Date().toISOString(),
-      currency,
+      currency: cart.currency || "EUR",
       items,
       subtotalCents,
       shippingCents,
       totalCents,
-      paymentMethod: "obliqpay", //
-      rawCart: {
-        ...cart,
-        id: cartId,
-      },
+      paymentMethod: "obliqpay",
+      shopDomain,
+      rawCart: cleanObject(cart),
     }
 
-    await db.collection(COLLECTION).doc(sessionId).set(docData)
+    console.log("[cart-session POST] 💾 Saving to Firebase...")
+    console.log("[cart-session POST] Total:", totalCents, "cents")
 
-    console.log("✅ Cart session created:", sessionId)
+    // ✅ Pulisci tutto il documento prima del save
+    const cleanedData = cleanObject(docData)
 
-    return new NextResponse(
-      JSON.stringify({
-        sessionId,
-        currency,
-        items,
-        subtotalCents,
-        shippingCents,
-        totalCents,
-      }),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders(origin),
-        },
-      },
-    )
-  } catch (err) {
-    console.error("[cart-session POST] errore:", err)
-    return new NextResponse(
-      JSON.stringify({
-        error: "Errore interno creazione sessione carrello",
-      }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders(null),
-        },
-      },
-    )
+    await db.collection("cartSessions").doc(sessionId).set(cleanedData)
+    
+    console.log("[cart-session POST] ✅ Saved successfully!")
+
+    return NextResponse.json({ 
+      sessionId, 
+      success: true 
+    })
+  } catch (error: any) {
+    console.error("[cart-session POST] ❌ Error:", error.message)
+    console.error("[cart-session POST] Stack:", error.stack)
+    return NextResponse.json({ 
+      error: "Errore interno creazione sessione carrello",
+      details: error.message 
+    }, { status: 500 })
   }
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const origin = req.headers.get("origin")
     const { searchParams } = new URL(req.url)
     const sessionId = searchParams.get("sessionId")
 
     if (!sessionId) {
-      return new NextResponse(
-        JSON.stringify({ error: "sessionId mancante" }),
-        {
-          status: 400,
-          headers: {
-            "Content-Type": "application/json",
-            ...corsHeaders(origin),
-          },
-        },
-      )
+      return NextResponse.json({ error: "Missing sessionId" }, { status: 400 })
     }
 
-    const snap = await db.collection(COLLECTION).doc(sessionId).get()
+    console.log("[cart-session GET] Fetching session:", sessionId)
 
-    if (!snap.exists) {
-      return new NextResponse(
-        JSON.stringify({ error: "Nessun carrello trovato" }),
-        {
-          status: 404,
-          headers: {
-            "Content-Type": "application/json",
-            ...corsHeaders(origin),
-          },
-        },
-      )
+    const doc = await db.collection("cartSessions").doc(sessionId).get()
+
+    if (!doc.exists) {
+      return NextResponse.json({ error: "Session not found" }, { status: 404 })
     }
 
-    const data = snap.data() || {}
-
-    const currency = (data.currency || "EUR").toString().toUpperCase()
-    const items = Array.isArray(data.items) ? data.items : []
-
-    const subtotalCents =
-      typeof data.subtotalCents === "number"
-        ? data.subtotalCents
-        : typeof data.totals?.subtotal === "number"
-        ? data.totals.subtotal
-        : 0
-
-    const shippingCents =
-      typeof data.shippingCents === "number" ? data.shippingCents : 0
-
-    const totalCents =
-      typeof data.totalCents === "number"
-        ? data.totalCents
-        : subtotalCents + shippingCents
-
-    return new NextResponse(
-      JSON.stringify({
-        sessionId,
-        currency,
-        items,
-        subtotalCents,
-        shippingCents,
-        totalCents,
-        rawCart: data.rawCart || null,
-        shopifyOrderNumber: data.shopifyOrderNumber,
-        shopifyOrderId: data.shopifyOrderId,
-        customer: data.customer,
-        shopDomain: data.shopDomain,
-      }),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders(origin),
-        },
-      },
-    )
-  } catch (err) {
-    console.error("[cart-session GET] errore:", err)
-    return new NextResponse(
-      JSON.stringify({
-        error: "Errore interno lettura sessione carrello",
-      }),
-      {
-        status: 500,
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders(null),
-        },
-      },
-    )
+    return NextResponse.json(doc.data())
+  } catch (error: any) {
+    console.error("[cart-session GET] Error:", error.message)
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
