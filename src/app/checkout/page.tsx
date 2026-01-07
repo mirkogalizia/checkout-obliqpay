@@ -112,65 +112,157 @@ function ObliqpayIframe({
       lastName: "Cliente",
     },
   }),
-})
+})"use client"
 
-        const json = await r.json().catch(() => ({}))
+import { useState, useEffect, useMemo, useRef, FormEvent, ChangeEvent, Suspense } from "react"
+import { useSearchParams } from "next/navigation"
 
-        if (!r.ok || !json?.ok) {
-          throw new Error(json?.error || "Init Obliqpay fallito")
-        }
+interface CartSessionResponse {
+  items: Array<{
+    title: string
+    variantTitle?: string
+    quantity: number
+    priceCents: number
+    linePriceCents?: number
+    image?: string
+  }>
+  subtotalCents?: number
+  totalCents?: number
+  currency?: string
+  shopDomain?: string
+}
 
-        if (!alive || !mountedRef.current) return
+interface CustomerForm {
+  fullName: string
+  email: string
+  phone: string
+  address1: string
+  address2: string
+  city: string
+  postalCode: string
+  province: string
+  countryCode: string
+}
 
-        setCheckoutUrl(json.checkoutUrl)
-        onOrderReady({ orderId: json.orderId, checkoutUrl: json.checkoutUrl })
-        setLoading(false)
-      } catch (e: any) {
-        if (!alive || !mountedRef.current) return
-        setLoading(false)
-        onError(e?.message || "Errore Obliqpay")
-      }
-    }
+function formatMoney(cents: number, currency: string) {
+  const amount = cents / 100
+  return new Intl.NumberFormat("it-IT", {
+    style: "currency",
+    currency: currency || "EUR",
+  }).format(amount)
+}
 
-    boot()
+// ✅ COMPONENTE MODIFICATO: Redirect invece di iframe
+function ObliqpayRedirect({
+  sessionId,
+  amountCents,
+  currency,
+  customerEmail,
+  paymentKey,
+  onOrderReady,
+  onError,
+}: {
+  sessionId: string
+  amountCents: number
+  currency: string
+  customerEmail: string
+  paymentKey: string
+  onOrderReady: (data: { orderId: string; checkoutUrl: string }) => void
+  onError: (msg: string) => void
+}) {
+  const [loading, setLoading] = useState(false)
+  const [redirecting, setRedirecting] = useState(false)
+  const mountedRef = useRef(true)
 
+  useEffect(() => {
+    mountedRef.current = true
     return () => {
-      alive = false
+      mountedRef.current = false
     }
-    // 🔥 paymentKey forza il re-init quando cambiano i dati rilevanti
-  }, [sessionId, amountCents, currency, customerEmail, paymentKey, onOrderReady, onError])
+  }, [])
+
+  // Funzione per creare ordine e fare redirect
+  const handlePayment = async () => {
+    if (loading || redirecting) return
+    
+    setLoading(true)
+    let alive = true
+
+    try {
+      const r = await fetch("/api/obliqpay/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          amount: (amountCents / 100).toFixed(2),
+          currency: currency.toLowerCase(),
+          customer: { email: customerEmail },
+        }),
+      })
+
+      const json = await r.json().catch(() => ({}))
+
+      if (!r.ok || !json?.ok) {
+        throw new Error(json?.error || "Init Obliqpay fallito")
+      }
+
+      if (!alive || !mountedRef.current) return
+
+      onOrderReady({ orderId: json.orderId, checkoutUrl: json.checkoutUrl })
+      
+      // ✅ REDIRECT NELLA STESSA FINESTRA
+      setRedirecting(true)
+      console.log("✅ Redirect a:", json.checkoutUrl)
+      
+      // Piccolo delay per permettere di vedere il messaggio
+      setTimeout(() => {
+        window.location.href = json.checkoutUrl
+      }, 500)
+
+    } catch (e: any) {
+      if (!alive || !mountedRef.current) return
+      setLoading(false)
+      onError(e?.message || "Errore Obliqpay")
+    }
+  }
 
   return (
     <div className="border border-gray-300 rounded-xl p-4 bg-white shadow-sm mb-4">
-      {loading && (
-        <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-3">
-          <div className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-blue-500 border-t-transparent" />
+      {!redirecting ? (
+        <button
+          onClick={handlePayment}
+          disabled={loading}
+          className="w-full py-4 px-6 text-white font-semibold rounded-xl transition-all"
+          style={{
+            background: loading 
+              ? "#d1d5db" 
+              : "linear-gradient(135deg, #2C6ECB 0%, #1f5bb8 100%)",
+            cursor: loading ? "not-allowed" : "pointer",
+          }}
+        >
+          {loading ? (
+            <span className="flex items-center justify-center gap-2">
+              <div className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+              Inizializzazione pagamento...
+            </span>
+          ) : (
+            <span className="flex items-center justify-center gap-2">
+              🔒 Paga in maniera sicura
+            </span>
+          )}
+        </button>
+      ) : (
+        <div className="flex items-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+          <div className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent" />
           <p className="text-sm text-blue-800 font-medium">
-            Inizializzo pagamento sicuro...
+            ✅ Reindirizzamento al pagamento sicuro...
           </p>
         </div>
       )}
-
-      {checkoutUrl ? (
-        <iframe
-          src={checkoutUrl}
-          style={{
-            width: "100%",
-            height: 560,
-            border: "none",
-            borderRadius: 12,
-          }}
-          allow="payment"
-        />
-      ) : (
-        !loading && (
-          <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl">
-            <p className="text-sm text-gray-600 text-center">
-              Impossibile caricare il pagamento. Riprova.
-            </p>
-          </div>
-        )
-      )}
+      
+      <p className="text-xs text-gray-500 text-center mt-3">
+        🔒 Sarai reindirizzato alla pagina sicura di Obliqpay
+      </p>
     </div>
   )
 }
@@ -212,7 +304,7 @@ function CheckoutInner({
     countryCode: "IT",
   })
 
-  const [loading, setLoading] = useState(false) // qui usato per "check status"
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
@@ -228,7 +320,6 @@ function CheckoutInner({
   const autocompleteRef = useRef<any>(null)
   const scriptLoadedRef = useRef(false)
 
-  // ✅ Obliqpay
   const [obliqpayOrderId, setObliqpayOrderId] = useState<string | null>(null)
   const [paymentKey, setPaymentKey] = useState<string>("")
   const [isPaid, setIsPaid] = useState(false)
@@ -251,7 +342,6 @@ function CheckoutInner({
     return raw > 0 ? raw : 0
   }, [subtotalCents, cart.totalCents])
 
-  // ⚠️ come prima: spedizione flat 5,90
   const totalToPayCents = subtotalCents - discountCents + 590
 
   const firstName = customer.fullName.split(" ")[0] || ""
@@ -260,9 +350,7 @@ function CheckoutInner({
   const billingFirstName = billingAddress.fullName.split(" ")[0] || ""
   const billingLastName = billingAddress.fullName.split(" ").slice(1).join(" ") || ""
 
-  // ---------------------------
-  // Google Places Autocomplete (invariato)
-  // ---------------------------
+  // Google Places Autocomplete
   useEffect(() => {
     let mounted = true
     const win = window as any
@@ -404,10 +492,7 @@ function CheckoutInner({
     return shippingValid && billingValid
   }
 
-  // ---------------------------
-  // Calcolo spedizione (invariato: flat 5,90)
-  // + reset Obliqpay se cambia hash
-  // ---------------------------
+  // Calcolo spedizione
   useEffect(() => {
     async function calculateShipping() {
       const formHash = JSON.stringify({
@@ -452,10 +537,9 @@ function CheckoutInner({
           setCalculatedShippingCents(flatShippingCents)
           setLastCalculatedHash(formHash)
 
-          // 🔥 reset pagamento
           setObliqpayOrderId(null)
           setIsPaid(false)
-          setPaymentKey(`${Date.now()}`) // forza re-render iframe (re-init)
+          setPaymentKey(`${Date.now()}`)
 
           setIsCalculatingShipping(false)
         } catch (err: any) {
@@ -494,9 +578,7 @@ function CheckoutInner({
     lastCalculatedHash,
   ])
 
-  // ---------------------------
-  // Poll status Obliqpay → redirect
-  // ---------------------------
+  // Poll status Obliqpay (anche se con redirect probabilmente non serve più)
   useEffect(() => {
     if (!obliqpayOrderId) return
     if (isPaid) return
@@ -529,43 +611,8 @@ function CheckoutInner({
     }
   }, [obliqpayOrderId, isPaid, sessionId])
 
-  // Manteniamo onSubmit solo per evitare refresh, ma non paga più qui
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    setError(null)
-    setSuccess(false)
-
-    if (!isFormValid()) {
-      setError("Compila tutti i campi obbligatori")
-      return
-    }
-
-    if (!obliqpayOrderId) {
-      setError("Apri il box pagamento e completa la transazione per continuare")
-      return
-    }
-
-    // Forza un check status manuale (utile se polling bloccato da qualcosa)
-    try {
-      setLoading(true)
-      const r = await fetch(
-        `/api/obliqpay/status?orderId=${encodeURIComponent(obliqpayOrderId)}`
-      )
-      const j = await r.json().catch(() => ({}))
-      const s = j?.order?.status || j?.order?.payment_status
-
-      if (s === "paid" || s === "completed" || s === "succeeded") {
-        setIsPaid(true)
-        setSuccess(true)
-        window.location.href = `/thank-you?sessionId=${sessionId}`
-      } else {
-        setError("Pagamento non ancora completato. Termina la procedura nel box pagamento.")
-      }
-    } catch (err: any) {
-      setError(err?.message || "Errore verifica pagamento")
-    } finally {
-      setLoading(false)
-    }
   }
 
   return (
@@ -751,7 +798,6 @@ function CheckoutInner({
         <div className="max-w-6xl mx-auto px-4 py-6">
           <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 rounded-2xl p-4 md:p-5 border border-blue-100 shadow-sm">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-              {/* ... invariato (tuo banner) ... */}
               <div className="flex items-center gap-3 bg-white/80 backdrop-blur-sm rounded-xl px-3 py-3 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center shadow-md">
                   <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
@@ -1237,7 +1283,7 @@ function CheckoutInner({
                       </div>
                     </div>
 
-                    {/* SOCIAL PROOF (invariato) */}
+                    {/* SOCIAL PROOF */}
                     <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 shadow-sm">
                       <div className="flex items-start gap-4">
                         <div className="flex -space-x-3">
@@ -1284,7 +1330,7 @@ function CheckoutInner({
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Pagamento</h2>
 
-                  {/* METODI (invariato) */}
+                  {/* METODI */}
                   <div className="mb-4 p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-semibold text-gray-700">Metodi accettati:</span>
@@ -1309,7 +1355,7 @@ function CheckoutInner({
                     </div>
                   </div>
 
-                  {/* SICUREZZA (invariato) */}
+                  {/* SICUREZZA */}
                   <div className="mb-4 flex items-center justify-center gap-4 text-xs text-gray-600 bg-blue-50 py-2.5 px-3 rounded-xl border border-blue-100">
                     <div className="flex items-center gap-1.5">
                       <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
@@ -1372,9 +1418,9 @@ function CheckoutInner({
                     </div>
                   )}
 
-                  {/* ✅ BLOCCO PAGAMENTO OBLIQPAY */}
+                  {/* ✅ BLOCCO PAGAMENTO CON REDIRECT */}
                   {isFormValid() && !isCalculatingShipping ? (
-                    <ObliqpayIframe
+                    <ObliqpayRedirect
                       sessionId={sessionId}
                       amountCents={totalToPayCents}
                       currency={currency}
@@ -1393,15 +1439,6 @@ function CheckoutInner({
                       </p>
                     </div>
                   )}
-
-                  {/* hint */}
-                  {isFormValid() && !isCalculatingShipping && (
-                    <p className="text-xs text-gray-500 mt-2">
-                      {obliqpayOrderId
-                        ? "✅ Pagamento pronto. Completa la transazione nel box qui sopra."
-                        : "A breve comparirà il box pagamento."}
-                    </p>
-                  )}
                 </div>
 
                 {error && (
@@ -1419,62 +1456,6 @@ function CheckoutInner({
                   </div>
                 )}
 
-                {success && (
-                  <div className="p-4 bg-green-50 border-2 border-green-200 rounded-xl">
-                    <div className="flex items-start gap-3">
-                      <svg className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      <p className="text-sm text-green-700 font-medium">
-                        Pagamento completato! Reindirizzamento...
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* CTA: ora serve solo come "verifica" (fallback) */}
-                <button
-                  type="submit"
-                  disabled={
-                    loading ||
-                    !isFormValid() ||
-                    isCalculatingShipping ||
-                    !obliqpayOrderId ||
-                    isPaid
-                  }
-                  className="shopify-btn"
-                >
-                  {loading ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        />
-                      </svg>
-                      Verifica...
-                    </span>
-                  ) : (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      Ho completato il pagamento
-                    </span>
-                  )}
-                </button>
-
-                {/* footer note */}
                 <div className="mt-4 text-center">
                   <p className="text-xs text-gray-500 flex items-center justify-center gap-1.5">
                     <svg className="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
@@ -1553,7 +1534,6 @@ function CheckoutInner({
                 </div>
               </div>
             </div>
-
           </div>
         </div>
       </div>
@@ -1561,7 +1541,7 @@ function CheckoutInner({
   )
 }
 
-// ---- Page wrapper
+// Page wrapper
 function CheckoutPageContent() {
   const searchParams = useSearchParams()
   const sessionId = searchParams.get("sessionId") || ""
