@@ -1,81 +1,151 @@
-import { NextRequest, NextResponse } from "next/server"
-import { db } from "@/lib/firebaseAdmin"
+// src/app/api/obliqpay/create-order/route.ts
+import { NextRequest, NextResponse } from 'next/server'
 
-const COLLECTION = "cartSessions"
-
-export async function POST(req: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    const { sessionId, amountCents, currency, email } = await req.json()
-
-    if (!sessionId || !amountCents || !email) {
-      return NextResponse.json({ ok: false, error: "Missing fields" }, { status: 400 })
+    const body = await request.json()
+    
+    // 🔍 DEBUG: Stampa tutto quello che ricevi
+    console.log('📥 [DEBUG] Body ricevuto:', JSON.stringify(body, null, 2))
+    console.log('📥 [DEBUG] Headers:', JSON.stringify(Object.fromEntries(request.headers), null, 2))
+    
+    // Valida i campi obbligatori
+    const requiredFields = ['amount', 'currency', 'orderId', 'customer']
+    const missingFields = requiredFields.filter(field => !body[field])
+    
+    if (missingFields.length > 0) {
+      console.error('❌ [ERROR] Campi mancanti:', missingFields)
+      return NextResponse.json(
+        { 
+          error: 'Missing required fields',
+          missingFields,
+          receivedBody: body
+        },
+        { 
+          status: 400,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+          }
+        }
+      )
     }
 
-    const snap = await db.collection(COLLECTION).doc(sessionId).get()
-    if (!snap.exists) {
-      return NextResponse.json({ ok: false, error: "Session not found" }, { status: 404 })
+    // Valida customer object
+    if (!body.customer.email || !body.customer.firstName || !body.customer.lastName) {
+      console.error('❌ [ERROR] Dati customer incompleti:', body.customer)
+      return NextResponse.json(
+        { 
+          error: 'Incomplete customer data',
+          receivedCustomer: body.customer
+        },
+        { 
+          status: 400,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+          }
+        }
+      )
     }
 
-    const data = snap.data() || {}
-
-    // ✅ se già creato e non scaduto, riusa
-    if (data?.obliqpay?.checkoutUrl && data?.obliqpay?.orderId && data?.obliqpay?.expiresAt) {
-      const exp = new Date(data.obliqpay.expiresAt).getTime()
-      if (Date.now() < exp - 10_000) {
-        return NextResponse.json({ ok: true, ...data.obliqpay })
+    // Chiama API Obliq
+    console.log('📤 [DEBUG] Invio a Obliq...')
+    
+    const obliqPayload = {
+      amount: parseFloat(body.amount),
+      currency: body.currency,
+      order_id: body.orderId,
+      customer: {
+        email: body.customer.email,
+        first_name: body.customer.firstName,
+        last_name: body.customer.lastName,
+        phone: body.customer.phone || '',
+      },
+      items: body.items || [],
+      shipping_address: body.shippingAddress || null,
+      billing_address: body.billingAddress || null,
+      metadata: {
+        source: 'shopify',
+        session_id: body.orderId,
+        ...body.metadata
       }
     }
 
-    const apiKey = process.env.OBLIQPAY_API_KEY
-    const base = process.env.OBLIQPAY_API_BASE || "https://api.obliqpay.com"
-    const appUrl = process.env.APP_URL
-    const webhookSecret = process.env.OBLIQPAY_WEBHOOK_SECRET
+    console.log('📤 [DEBUG] Payload Obliq:', JSON.stringify(obliqPayload, null, 2))
 
-    if (!apiKey || !appUrl || !webhookSecret) {
-      return NextResponse.json({ ok: false, error: "Missing env" }, { status: 500 })
-    }
-
-    const amount = Number((amountCents / 100).toFixed(2)) // Obliqpay vuole importo decimale
-
-    const webhook_url = `${appUrl}/api/obliqpay/webhook?secret=${encodeURIComponent(webhookSecret)}&sessionId=${encodeURIComponent(sessionId)}`
-
-    const r = await fetch(`${base}/orders`, {
-      method: "POST",
+    const obliqResponse = await fetch('https://api.obliq.io/v1/orders', {
+      method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OBLIQ_API_KEY}`,
       },
-      body: JSON.stringify({
-        amount,
-        currency: (currency || "EUR").toUpperCase(),
-        email,
-        webhook_url,
-      }),
+      body: JSON.stringify(obliqPayload),
     })
+    
+    const obliqData = await obliqResponse.json()
+    
+    console.log('✅ [DEBUG] Risposta Obliq status:', obliqResponse.status)
+    console.log('✅ [DEBUG] Risposta Obliq data:', JSON.stringify(obliqData, null, 2))
 
-    const json = await r.json().catch(() => ({}))
-    if (!r.ok) {
-      return NextResponse.json({ ok: false, error: json?.error || "Obliqpay create failed", raw: json }, { status: 400 })
+    if (!obliqResponse.ok) {
+      console.error('❌ [ERROR] Obliq API error:', obliqData)
+      return NextResponse.json(
+        { 
+          error: 'Obliq API error',
+          details: obliqData,
+          status: obliqResponse.status
+        },
+        { 
+          status: obliqResponse.status,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+          }
+        }
+      )
     }
-
-    const obliqpay = {
-      orderId: json.orderId,
-      checkoutUrl: json.checkoutUrl,
-      expiresAt: json.expiresAt,
-      amountCents,
-      currency: (currency || "EUR").toUpperCase(),
-      email,
-      status: "created",
-      updatedAt: new Date().toISOString(),
-    }
-
-    await db.collection(COLLECTION).doc(sessionId).set(
-      { obliqpay },
-      { merge: true }
+    
+    return NextResponse.json(obliqData, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      }
+    })
+    
+  } catch (error: any) {
+    console.error('💥 [ERROR] Catch:', error.message)
+    console.error('💥 [ERROR] Stack:', error.stack)
+    return NextResponse.json(
+      { 
+        error: 'Internal server error', 
+        details: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      },
+      { 
+        status: 500,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+        }
+      }
     )
-
-    return NextResponse.json({ ok: true, ...obliqpay })
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || "Server error" }, { status: 500 })
   }
+}
+
+// Gestisci preflight OPTIONS
+export async function OPTIONS(request: NextRequest) {
+  return NextResponse.json({}, {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Max-Age': '86400',
+    }
+  })
 }
