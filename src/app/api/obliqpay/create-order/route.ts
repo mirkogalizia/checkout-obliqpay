@@ -5,78 +5,32 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     
-    // 🔍 DEBUG: Stampa tutto quello che ricevi
     console.log('📥 [DEBUG] Body ricevuto:', JSON.stringify(body, null, 2))
-    console.log('📥 [DEBUG] Headers:', JSON.stringify(Object.fromEntries(request.headers), null, 2))
     
-    // Valida i campi obbligatori
-    const requiredFields = ['amount', 'currency', 'orderId', 'customer']
-    const missingFields = requiredFields.filter(field => !body[field])
-    
-    if (missingFields.length > 0) {
-      console.error('❌ [ERROR] Campi mancanti:', missingFields)
+    // Valida campi obbligatori
+    if (!body.amount || !body.currency) {
+      console.error('❌ [ERROR] amount o currency mancanti')
       return NextResponse.json(
-        { 
-          error: 'Missing required fields',
-          missingFields,
-          receivedBody: body
-        },
-        { 
-          status: 400,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type',
-          }
-        }
+        { error: 'Missing required fields: amount, currency' },
+        { status: 400 }
       )
     }
 
-    // Valida customer object
-    if (!body.customer.email || !body.customer.firstName || !body.customer.lastName) {
-      console.error('❌ [ERROR] Dati customer incompleti:', body.customer)
-      return NextResponse.json(
-        { 
-          error: 'Incomplete customer data',
-          receivedCustomer: body.customer
-        },
-        { 
-          status: 400,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type',
-          }
-        }
-      )
-    }
-
-    // Chiama API Obliq
-    console.log('📤 [DEBUG] Invio a Obliq...')
-    
+    // Prepara payload per Obliq (FORMATO CORRETTO)
     const obliqPayload = {
       amount: parseFloat(body.amount),
-      currency: body.currency,
-      order_id: body.orderId,
-      customer: {
-        email: body.customer.email,
-        first_name: body.customer.firstName,
-        last_name: body.customer.lastName,
-        phone: body.customer.phone || '',
-      },
-      items: body.items || [],
-      shipping_address: body.shippingAddress || null,
-      billing_address: body.billingAddress || null,
-      metadata: {
-        source: 'shopify',
-        session_id: body.orderId,
-        ...body.metadata
-      }
+      currency: body.currency.toLowerCase(), // "eur", "usd", ecc.
+      email: body.customer?.email || undefined,
+      webhook_url: process.env.NEXT_PUBLIC_BASE_URL 
+        ? `${process.env.NEXT_PUBLIC_BASE_URL}/api/obliqpay/webhook`
+        : undefined
     }
 
     console.log('📤 [DEBUG] Payload Obliq:', JSON.stringify(obliqPayload, null, 2))
+    console.log('🔑 [DEBUG] API Key presente?', !!process.env.OBLIQ_API_KEY)
 
-    const obliqResponse = await fetch('https://api.obliq.io/v1/orders', {
+    // ✅ URL CORRETTO
+    const obliqResponse = await fetch('https://api.obliqpay.com/orders', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -87,8 +41,8 @@ export async function POST(request: NextRequest) {
     
     const obliqData = await obliqResponse.json()
     
-    console.log('✅ [DEBUG] Risposta Obliq status:', obliqResponse.status)
-    console.log('✅ [DEBUG] Risposta Obliq data:', JSON.stringify(obliqData, null, 2))
+    console.log('📡 [DEBUG] Status Obliq:', obliqResponse.status)
+    console.log('📥 [DEBUG] Risposta Obliq:', JSON.stringify(obliqData, null, 2))
 
     if (!obliqResponse.ok) {
       console.error('❌ [ERROR] Obliq API error:', obliqData)
@@ -98,23 +52,16 @@ export async function POST(request: NextRequest) {
           details: obliqData,
           status: obliqResponse.status
         },
-        { 
-          status: obliqResponse.status,
-          headers: {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type',
-          }
-        }
+        { status: obliqResponse.status }
       )
     }
     
-    return NextResponse.json(obliqData, {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
-      }
+    // ✅ Risposta nel formato atteso dal frontend
+    return NextResponse.json({
+      ok: true,
+      orderId: obliqData.orderId,
+      checkoutUrl: obliqData.checkoutUrl,
+      expiresAt: obliqData.expiresAt
     })
     
   } catch (error: any) {
@@ -123,29 +70,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { 
         error: 'Internal server error', 
-        details: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        details: error.message
       },
-      { 
-        status: 500,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
-        }
-      }
+      { status: 500 }
     )
   }
 }
 
-// Gestisci preflight OPTIONS
 export async function OPTIONS(request: NextRequest) {
   return NextResponse.json({}, {
     headers: {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
-      'Access-Control-Max-Age': '86400',
     }
   })
 }
