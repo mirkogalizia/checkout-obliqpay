@@ -1,4 +1,3 @@
-// src/app/checkout/page.tsx
 "use client"
 
 import React, {
@@ -59,35 +58,31 @@ function formatMoney(cents: number | undefined, currency: string = "EUR") {
 }
 
 /**
- * Redsys inSite (iframe carta inline)
- * - Carica redsysV3.js
- * - Chiede parametri firmati al backend (insite-init)
- * - Renderizza iframe nel container
- * - Riceve idOper via callback globale storeIdOper
+ * Obliqpay Iframe
+ * - Chiama /api/obliqpay/create-order
+ * - Renderizza iframe checkoutUrl
+ * - Quando cambia paymentKey (hash) reinizializza
  */
-/**
- * Redsys inSite (iframe carta inline) - VERSIONE CORRETTA
- * 1) Chiama API per ottenere parametri firmati + scriptUrl
- * 2) Carica script Redsys dall'URL ricevuto (prod/test automatico)
- * 3) Renderizza iframe nel container
- * 4) Riceve idOper via callback globale
- */
-function RedsysInsite({
+function ObliqpayIframe({
   sessionId,
   amountCents,
+  currency,
   customerEmail,
-  onReadyToken,
+  paymentKey,
+  onOrderReady,
   onError,
 }: {
   sessionId: string
   amountCents: number
+  currency: string
   customerEmail: string
-  onReadyToken: (idOper: string) => void
+  paymentKey: string
+  onOrderReady: (x: { orderId: string; checkoutUrl: string }) => void
   onError: (msg: string) => void
 }) {
   const [loading, setLoading] = useState(true)
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null)
   const mountedRef = useRef(false)
-  const initializedRef = useRef(false) // ✅ Previene re-init multipli
 
   useEffect(() => {
     mountedRef.current = true
@@ -97,108 +92,49 @@ function RedsysInsite({
   }, [])
 
   useEffect(() => {
-    // ✅ Skip se già inizializzato
-    if (initializedRef.current) {
-      console.log("⚠️ InSite già inizializzato, skip")
-      return
-    }
-    initializedRef.current = true
+    let alive = true
 
     async function boot() {
       try {
         setLoading(true)
+        setCheckoutUrl(null)
 
-        const initRes = await fetch("/api/redsys/insite-init", {
+        const r = await fetch("/api/obliqpay/create-order", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, amountCents, email: customerEmail }),
-        })
-        const initData = await initRes.json()
-
-        if (!initRes.ok || !initData?.fuc) throw new Error(initData?.error || "Init fallito")
-
-        console.log("✅ Parametri:", initData.orderId)
-
-        // Carica script
-        await new Promise<void>((resolve, reject) => {
-          if (document.getElementById("redsys-v3")) {
-            console.log("ℹ️ Script già caricato")
-            return resolve()
-          }
-          
-          const s = document.createElement("script")
-          s.id = "redsys-v3"
-          s.src = initData.scriptUrl
-          s.async = true
-          s.onload = () => {
-            console.log("✅ Script caricato")
-            resolve()
-          }
-          s.onerror = () => reject(new Error("Script load error"))
-          document.body.appendChild(s)
+          body: JSON.stringify({
+            sessionId,
+            amountCents,
+            currency,
+            email: customerEmail,
+          }),
         })
 
-        // ✅ ASPETTA che getInSiteForm sia disponibile
-        let attempts = 0
-        while (attempts < 50) {
-          if ((window as any).getInSiteForm) {
-            console.log("✅ getInSiteForm disponibile")
-            break
-          }
-          await new Promise(r => setTimeout(r, 100))
-          attempts++
+        const json = await r.json().catch(() => ({}))
+
+        if (!r.ok || !json?.ok) {
+          throw new Error(json?.error || "Init Obliqpay fallito")
         }
 
-        const win: any = window
-        
-        if (!win?.getInSiteForm) {
-          throw new Error("getInSiteForm timeout")
-        }
+        if (!alive || !mountedRef.current) return
 
-        // Callbacks
-        win.storeIdOper = function(idOper: string) {
-          if (!mountedRef.current) return
-          console.log("✅ idOper:", idOper)
-          if (idOper?.length > 0) onReadyToken(idOper)
-        }
-
-        win.errorFunction = function(msg: string) {
-          if (!mountedRef.current) return
-          console.error("❌ Errore:", msg)
-          onError(msg || "Errore Redsys")
-        }
-
-        const container = document.getElementById("redsys_container")
-        if (container) container.innerHTML = ""
-
-        console.log("📝 Chiamata getInSiteForm")
-        
-        win.getInSiteForm(
-          'redsys_container',
-          '',
-          '',
-          '',
-          '',
-          'Pagar',
-          initData.fuc,
-          initData.terminal,
-          initData.orderId,
-          'IT',
-          true
-        )
-
-        if (mountedRef.current) setLoading(false)
+        setCheckoutUrl(json.checkoutUrl)
+        onOrderReady({ orderId: json.orderId, checkoutUrl: json.checkoutUrl })
+        setLoading(false)
       } catch (e: any) {
-        console.error("❌ Errore:", e)
-        if (mountedRef.current) {
-          setLoading(false)
-          onError(e?.message || "Errore Redsys")
-        }
+        if (!alive || !mountedRef.current) return
+        setLoading(false)
+        onError(e?.message || "Errore Obliqpay")
       }
     }
 
     boot()
-  }, []) // ✅ Dipendenze VUOTE - esegue UNA volta sola
+
+    return () => {
+      alive = false
+    }
+    // 🔥 paymentKey forza il re-init quando cambiano i dati rilevanti
+  }, [sessionId, amountCents, currency, customerEmail, paymentKey, onOrderReady, onError])
 
   return (
     <div className="border border-gray-300 rounded-xl p-4 bg-white shadow-sm mb-4">
@@ -210,13 +146,30 @@ function RedsysInsite({
           </p>
         </div>
       )}
-      <div id="redsys_container" />
+
+      {checkoutUrl ? (
+        <iframe
+          src={checkoutUrl}
+          style={{
+            width: "100%",
+            height: 560,
+            border: "none",
+            borderRadius: 12,
+          }}
+          allow="payment"
+        />
+      ) : (
+        !loading && (
+          <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl">
+            <p className="text-sm text-gray-600 text-center">
+              Impossibile caricare il pagamento. Riprova.
+            </p>
+          </div>
+        )
+      )}
     </div>
   )
 }
-
-
-
 
 function CheckoutInner({
   cart,
@@ -255,9 +208,10 @@ function CheckoutInner({
     countryCode: "IT",
   })
 
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(false) // qui usato per "check status"
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+
   const [calculatedShippingCents, setCalculatedShippingCents] = useState<number>(0)
   const [isCalculatingShipping, setIsCalculatingShipping] = useState(false)
   const [shippingError, setShippingError] = useState<string | null>(null)
@@ -270,8 +224,10 @@ function CheckoutInner({
   const autocompleteRef = useRef<any>(null)
   const scriptLoadedRef = useRef(false)
 
-  // 🔥 Redsys token (idOper) generato dall’iframe inSite
-  const [redsysIdOper, setRedsysIdOper] = useState<string | null>(null)
+  // ✅ Obliqpay
+  const [obliqpayOrderId, setObliqpayOrderId] = useState<string | null>(null)
+  const [paymentKey, setPaymentKey] = useState<string>("")
+  const [isPaid, setIsPaid] = useState(false)
 
   const currency = (cart.currency || "EUR").toUpperCase()
 
@@ -446,7 +402,7 @@ function CheckoutInner({
 
   // ---------------------------
   // Calcolo spedizione (invariato: flat 5,90)
-  // + reset token reds/iframe se cambia hash (per sicurezza)
+  // + reset Obliqpay se cambia hash
   // ---------------------------
   useEffect(() => {
     async function calculateShipping() {
@@ -463,18 +419,20 @@ function CheckoutInner({
         billingAddress1: useDifferentBilling ? billingAddress.address1.trim() : "",
         subtotal: subtotalCents,
         discount: discountCents,
+        total: totalToPayCents,
       })
 
       if (!isFormValid()) {
         setCalculatedShippingCents(0)
         setShippingError(null)
         setLastCalculatedHash("")
-        setRedsysIdOper(null)
+        setObliqpayOrderId(null)
+        setPaymentKey("")
+        setIsPaid(false)
         return
       }
 
       if (formHash === lastCalculatedHash) {
-        // form invariato → non serve ricalcolare
         return
       }
 
@@ -488,11 +446,12 @@ function CheckoutInner({
         try {
           const flatShippingCents = 590
           setCalculatedShippingCents(flatShippingCents)
-
           setLastCalculatedHash(formHash)
 
-          // reset token (forza re-init iframe)
-          setRedsysIdOper(null)
+          // 🔥 reset pagamento
+          setObliqpayOrderId(null)
+          setIsPaid(false)
+          setPaymentKey(`${Date.now()}`) // forza re-render iframe (re-init)
 
           setIsCalculatingShipping(false)
         } catch (err: any) {
@@ -527,9 +486,46 @@ function CheckoutInner({
     useDifferentBilling,
     subtotalCents,
     discountCents,
+    totalToPayCents,
     lastCalculatedHash,
   ])
 
+  // ---------------------------
+  // Poll status Obliqpay → redirect
+  // ---------------------------
+  useEffect(() => {
+    if (!obliqpayOrderId) return
+    if (isPaid) return
+
+    let stop = false
+    const interval = setInterval(async () => {
+      try {
+        const r = await fetch(
+          `/api/obliqpay/status?orderId=${encodeURIComponent(obliqpayOrderId)}`
+        )
+        const j = await r.json().catch(() => ({}))
+
+        const s = j?.order?.status || j?.order?.payment_status
+
+        if (!stop && (s === "paid" || s === "completed" || s === "succeeded")) {
+          stop = true
+          setIsPaid(true)
+          setSuccess(true)
+          clearInterval(interval)
+          window.location.href = `/thank-you?sessionId=${sessionId}`
+        }
+      } catch {
+        // silent
+      }
+    }, 2000)
+
+    return () => {
+      stop = true
+      clearInterval(interval)
+    }
+  }, [obliqpayOrderId, isPaid, sessionId])
+
+  // Manteniamo onSubmit solo per evitare refresh, ma non paga più qui
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
@@ -540,65 +536,30 @@ function CheckoutInner({
       return
     }
 
-    if (!redsysIdOper) {
-      setError("Inserisci i dati carta per continuare")
+    if (!obliqpayOrderId) {
+      setError("Apri il box pagamento e completa la transazione per continuare")
       return
     }
 
+    // Forza un check status manuale (utile se polling bloccato da qualcosa)
     try {
       setLoading(true)
+      const r = await fetch(
+        `/api/obliqpay/status?orderId=${encodeURIComponent(obliqpayOrderId)}`
+      )
+      const j = await r.json().catch(() => ({}))
+      const s = j?.order?.status || j?.order?.payment_status
 
-      const finalBillingAddress = useDifferentBilling ? billingAddress : customer
-
-      const payRes = await fetch("/api/redsys/pay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionId,
-          amountCents: totalToPayCents,
-          idOper: redsysIdOper,
-          customer: {
-            fullName: customer.fullName,
-            email: customer.email,
-            phone: customer.phone,
-            address1: customer.address1,
-            address2: customer.address2,
-            city: customer.city,
-            postalCode: customer.postalCode,
-            province: customer.province,
-            countryCode: customer.countryCode || "IT",
-          },
-          billing: useDifferentBilling
-            ? {
-                fullName: finalBillingAddress.fullName,
-                email: finalBillingAddress.email || customer.email,
-                phone: finalBillingAddress.phone || customer.phone,
-                address1: finalBillingAddress.address1,
-                address2: finalBillingAddress.address2,
-                city: finalBillingAddress.city,
-                postalCode: finalBillingAddress.postalCode,
-                province: finalBillingAddress.province,
-                countryCode: finalBillingAddress.countryCode || "IT",
-              }
-            : null,
-        }),
-      })
-
-      const payData = await payRes.json()
-
-      if (!payRes.ok || !payData?.ok) {
-        throw new Error(payData?.error || "Pagamento non riuscito")
-      }
-
-      setSuccess(true)
-      setLoading(false)
-
-      setTimeout(() => {
+      if (s === "paid" || s === "completed" || s === "succeeded") {
+        setIsPaid(true)
+        setSuccess(true)
         window.location.href = `/thank-you?sessionId=${sessionId}`
-      }, 800)
+      } else {
+        setError("Pagamento non ancora completato. Termina la procedura nel box pagamento.")
+      }
     } catch (err: any) {
-      console.error("Errore pagamento:", err)
-      setError(err.message || "Errore imprevisto")
+      setError(err?.message || "Errore verifica pagamento")
+    } finally {
       setLoading(false)
     }
   }
@@ -786,6 +747,7 @@ function CheckoutInner({
         <div className="max-w-6xl mx-auto px-4 py-6">
           <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 rounded-2xl p-4 md:p-5 border border-blue-100 shadow-sm">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+              {/* ... invariato (tuo banner) ... */}
               <div className="flex items-center gap-3 bg-white/80 backdrop-blur-sm rounded-xl px-3 py-3 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex-shrink-0 w-10 h-10 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center shadow-md">
                   <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
@@ -1271,7 +1233,7 @@ function CheckoutInner({
                       </div>
                     </div>
 
-                    {/* SOCIAL PROOF */}
+                    {/* SOCIAL PROOF (invariato) */}
                     <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 shadow-sm">
                       <div className="flex items-start gap-4">
                         <div className="flex -space-x-3">
@@ -1318,7 +1280,7 @@ function CheckoutInner({
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Pagamento</h2>
 
-                  {/* METODI */}
+                  {/* METODI (invariato) */}
                   <div className="mb-4 p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-semibold text-gray-700">Metodi accettati:</span>
@@ -1343,7 +1305,7 @@ function CheckoutInner({
                     </div>
                   </div>
 
-                  {/* SICUREZZA */}
+                  {/* SICUREZZA (invariato) */}
                   <div className="mb-4 flex items-center justify-center gap-4 text-xs text-gray-600 bg-blue-50 py-2.5 px-3 rounded-xl border border-blue-100">
                     <div className="flex items-center gap-1.5">
                       <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
@@ -1406,13 +1368,18 @@ function CheckoutInner({
                     </div>
                   )}
 
-                  {/* ✅ BLOCCO CARTA REDSYS INLINE */}
+                  {/* ✅ BLOCCO PAGAMENTO OBLIQPAY */}
                   {isFormValid() && !isCalculatingShipping ? (
-                    <RedsysInsite
+                    <ObliqpayIframe
                       sessionId={sessionId}
                       amountCents={totalToPayCents}
+                      currency={currency}
                       customerEmail={customer.email}
-                      onReadyToken={(idOper) => setRedsysIdOper(idOper)}
+                      paymentKey={paymentKey || "init"}
+                      onOrderReady={({ orderId }) => {
+                        setError(null)
+                        setObliqpayOrderId(orderId)
+                      }}
                       onError={(msg) => setError(msg)}
                     />
                   ) : (
@@ -1423,10 +1390,12 @@ function CheckoutInner({
                     </div>
                   )}
 
-                  {/* piccolo hint */}
+                  {/* hint */}
                   {isFormValid() && !isCalculatingShipping && (
                     <p className="text-xs text-gray-500 mt-2">
-                      {redsysIdOper ? "✅ Dati carta pronti" : "Inserisci i dati carta per abilitare il pagamento"}
+                      {obliqpayOrderId
+                        ? "✅ Pagamento pronto. Completa la transazione nel box qui sopra."
+                        : "A breve comparirà il box pagamento."}
                     </p>
                   )}
                 </div>
@@ -1456,18 +1425,22 @@ function CheckoutInner({
                           clipRule="evenodd"
                         />
                       </svg>
-                      <p className="text-sm text-green-700 font-medium">Pagamento completato! Reindirizzamento...</p>
+                      <p className="text-sm text-green-700 font-medium">
+                        Pagamento completato! Reindirizzamento...
+                      </p>
                     </div>
                   </div>
                 )}
 
+                {/* CTA: ora serve solo come "verifica" (fallback) */}
                 <button
                   type="submit"
                   disabled={
                     loading ||
                     !isFormValid() ||
                     isCalculatingShipping ||
-                    !redsysIdOper
+                    !obliqpayOrderId ||
+                    isPaid
                   }
                   className="shopify-btn"
                 >
@@ -1481,7 +1454,7 @@ function CheckoutInner({
                           d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
                         />
                       </svg>
-                      Elaborazione...
+                      Verifica...
                     </span>
                   ) : (
                     <span className="flex items-center justify-center gap-2">
@@ -1492,61 +1465,12 @@ function CheckoutInner({
                           clipRule="evenodd"
                         />
                       </svg>
-                      Paga in sicurezza
+                      Ho completato il pagamento
                     </span>
                   )}
                 </button>
 
-                {/* GARANZIE FINALI (invariate) */}
-                <div className="mt-6 space-y-3">
-                  <div className="flex items-start gap-3 p-3 bg-green-50 rounded-xl border border-green-200">
-                    <div className="flex-shrink-0 w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-                      <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-gray-900 mb-0.5">Garanzia Soddisfatti o Rimborsati</p>
-                      <p className="text-xs text-gray-600 leading-relaxed">
-                        14 giorni per restituire il prodotto e ricevere un rimborso completo
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3 p-3 bg-blue-50 rounded-xl border border-blue-200">
-                    <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                      <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
-                        <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1v-5a1 1 0 00-.293-.707l-2-2A1 1 0 0015 7h-1z" />
-                      </svg>
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-gray-900 mb-0.5">Spedizione Tracciata con BRT</p>
-                      <p className="text-xs text-gray-600 leading-relaxed">
-                        Tracking via email per monitorare il pacco in tempo reale
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3 p-3 bg-purple-50 rounded-xl border border-purple-200">
-                    <div className="flex-shrink-0 w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center">
-                      <svg className="w-4 h-4 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                      </svg>
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-gray-900 mb-0.5">Assistenza Clienti Dedicata</p>
-                      <p className="text-xs text-gray-600 leading-relaxed">
-                        Team disponibile 7 giorni su 7 via email o chat
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
+                {/* footer note */}
                 <div className="mt-4 text-center">
                   <p className="text-xs text-gray-500 flex items-center justify-center gap-1.5">
                     <svg className="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
@@ -1558,7 +1482,7 @@ function CheckoutInner({
                     </svg>
                     <span>Crittografia SSL a 256-bit</span>
                   </p>
-                  <p className="text-xs text-gray-400 mt-1">Powered by Redsys • 3D Secure</p>
+                  <p className="text-xs text-gray-400 mt-1">Powered by Obliqpay • Secure Checkout</p>
                 </div>
               </form>
             </div>
@@ -1612,7 +1536,9 @@ function CheckoutInner({
 
                     <div className="flex justify-between">
                       <span className="text-gray-600">Spedizione</span>
-                      <span className="text-gray-900 font-medium">{shippingCents > 0 ? formatMoney(shippingCents, currency) : "€5,90"}</span>
+                      <span className="text-gray-900 font-medium">
+                        {shippingCents > 0 ? formatMoney(shippingCents, currency) : "€5,90"}
+                      </span>
                     </div>
 
                     <div className="flex justify-between text-lg font-bold pt-4 border-t border-gray-200">
@@ -1631,8 +1557,7 @@ function CheckoutInner({
   )
 }
 
-// ---- Page wrapper (niente Stripe)
-// carica solo cart-session e poi renderizza CheckoutInner
+// ---- Page wrapper
 function CheckoutPageContent() {
   const searchParams = useSearchParams()
   const sessionId = searchParams.get("sessionId") || ""

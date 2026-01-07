@@ -126,7 +126,7 @@ export async function POST(req: NextRequest) {
       subtotalCents,
       shippingCents,
       totalCents,
-      paymentMethod: "redsys", // ✅ Solo Redsys
+      paymentMethod: "obliqpay", //
       rawCart: {
         ...cart,
         id: cartId,
