@@ -99,16 +99,20 @@ function ObliqpayIframe({
         setLoading(true)
         setCheckoutUrl(null)
 
-        const r = await fetch("/api/obliqpay/create-order", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId,
-            amountCents,
-            currency,
-            email: customerEmail,
-          }),
-        })
+       const r = await fetch("/api/obliqpay/create-order", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    amount: (amountCents / 100).toFixed(2),
+    currency: currency,
+    orderId: sessionId,
+    customer: {
+      email: customerEmail,
+      firstName: customerEmail.split("@")[0],
+      lastName: "Cliente",
+    },
+  }),
+})
 
         const json = await r.json().catch(() => ({}))
 
