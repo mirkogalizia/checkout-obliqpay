@@ -1,119 +1,5 @@
 "use client"
 
-import React, {
-  useEffect,
-  useMemo,
-  useState,
-  useRef,
-  ChangeEvent,
-  FormEvent,
-  Suspense,
-} from "react"
-import { useSearchParams } from "next/navigation"
-
-export const dynamic = "force-dynamic"
-
-type CheckoutItem = {
-  id: string | number
-  title: string
-  variantTitle?: string
-  quantity: number
-  priceCents?: number
-  linePriceCents?: number
-  image?: string
-}
-
-type CartSessionResponse = {
-  sessionId: string
-  currency: string
-  items: CheckoutItem[]
-  subtotalCents?: number
-  shippingCents?: number
-  totalCents?: number
-  discountCodes?: { code: string }[]
-  rawCart?: any
-  shopDomain?: string
-  error?: string
-}
-
-type CustomerForm = {
-  fullName: string
-  email: string
-  phone: string
-  address1: string
-  address2: string
-  city: string
-  postalCode: string
-  province: string
-  countryCode: string
-}
-
-function formatMoney(cents: number | undefined, currency: string = "EUR") {
-  const value = (cents ?? 0) / 100
-  return new Intl.NumberFormat("it-IT", {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 2,
-  }).format(value)
-}
-
-/**
- * Obliqpay Iframe
- * - Chiama /api/obliqpay/create-order
- * - Renderizza iframe checkoutUrl
- * - Quando cambia paymentKey (hash) reinizializza
- */
-function ObliqpayIframe({
-  sessionId,
-  amountCents,
-  currency,
-  customerEmail,
-  paymentKey,
-  onOrderReady,
-  onError,
-}: {
-  sessionId: string
-  amountCents: number
-  currency: string
-  customerEmail: string
-  paymentKey: string
-  onOrderReady: (x: { orderId: string; checkoutUrl: string }) => void
-  onError: (msg: string) => void
-}) {
-  const [loading, setLoading] = useState(true)
-  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null)
-  const mountedRef = useRef(false)
-
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
-
-  useEffect(() => {
-    let alive = true
-
-    async function boot() {
-      try {
-        setLoading(true)
-        setCheckoutUrl(null)
-
-       const r = await fetch("/api/obliqpay/create-order", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    amount: (amountCents / 100).toFixed(2),
-    currency: currency,
-    orderId: sessionId,
-    customer: {
-      email: customerEmail,
-      firstName: customerEmail.split("@")[0],
-      lastName: "Cliente",
-    },
-  }),
-})"use client"
-
 import { useState, useEffect, useMemo, useRef, FormEvent, ChangeEvent, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 
@@ -152,7 +38,7 @@ function formatMoney(cents: number, currency: string) {
   }).format(amount)
 }
 
-// ✅ COMPONENTE MODIFICATO: Redirect invece di iframe
+// ✅ MODIFICATO: Redirect invece di iframe
 function ObliqpayRedirect({
   sessionId,
   amountCents,
@@ -181,7 +67,6 @@ function ObliqpayRedirect({
     }
   }, [])
 
-  // Funzione per creare ordine e fare redirect
   const handlePayment = async () => {
     if (loading || redirecting) return
     
@@ -210,11 +95,9 @@ function ObliqpayRedirect({
 
       onOrderReady({ orderId: json.orderId, checkoutUrl: json.checkoutUrl })
       
-      // ✅ REDIRECT NELLA STESSA FINESTRA
       setRedirecting(true)
       console.log("✅ Redirect a:", json.checkoutUrl)
       
-      // Piccolo delay per permettere di vedere il messaggio
       setTimeout(() => {
         window.location.href = json.checkoutUrl
       }, 500)
@@ -350,7 +233,6 @@ function CheckoutInner({
   const billingFirstName = billingAddress.fullName.split(" ")[0] || ""
   const billingLastName = billingAddress.fullName.split(" ").slice(1).join(" ") || ""
 
-  // Google Places Autocomplete
   useEffect(() => {
     let mounted = true
     const win = window as any
@@ -492,7 +374,6 @@ function CheckoutInner({
     return shippingValid && billingValid
   }
 
-  // Calcolo spedizione
   useEffect(() => {
     async function calculateShipping() {
       const formHash = JSON.stringify({
@@ -578,7 +459,6 @@ function CheckoutInner({
     lastCalculatedHash,
   ])
 
-  // Poll status Obliqpay (anche se con redirect probabilmente non serve più)
   useEffect(() => {
     if (!obliqpayOrderId) return
     if (isPaid) return
@@ -743,7 +623,6 @@ function CheckoutInner({
       `}</style>
 
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
-        {/* HEADER */}
         <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-gray-200 shadow-sm">
           <div className="max-w-6xl mx-auto px-4 py-4">
             <div className="flex justify-between items-center">
@@ -794,7 +673,6 @@ function CheckoutInner({
           </div>
         </header>
 
-        {/* TRUST BANNER */}
         <div className="max-w-6xl mx-auto px-4 py-6">
           <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 rounded-2xl p-4 md:p-5 border border-blue-100 shadow-sm">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
@@ -862,7 +740,6 @@ function CheckoutInner({
           </div>
         </div>
 
-        {/* Mobile Summary Toggle */}
         <div className="max-w-2xl mx-auto px-4 lg:hidden">
           <div
             className="summary-toggle"
@@ -955,7 +832,6 @@ function CheckoutInner({
           <div className="lg:grid lg:grid-cols-2 lg:gap-12">
             <div>
               <form onSubmit={handleSubmit} className="space-y-5">
-                {/* CONTATTI */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Contatti</h2>
 
@@ -981,7 +857,6 @@ function CheckoutInner({
                   </div>
                 </div>
 
-                {/* CONSEGNA */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Consegna</h2>
 
@@ -1142,7 +1017,6 @@ function CheckoutInner({
                   </div>
                 </div>
 
-                {/* BILLING */}
                 <div className="flex items-start gap-2 p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
                   <input
                     type="checkbox"
@@ -1269,7 +1143,6 @@ function CheckoutInner({
                   </div>
                 )}
 
-                {/* SPEDIZIONE */}
                 {isFormValid() && (
                   <>
                     <div className="shopify-section">
@@ -1283,7 +1156,6 @@ function CheckoutInner({
                       </div>
                     </div>
 
-                    {/* SOCIAL PROOF */}
                     <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 shadow-sm">
                       <div className="flex items-start gap-4">
                         <div className="flex -space-x-3">
@@ -1326,11 +1198,9 @@ function CheckoutInner({
                   </>
                 )}
 
-                {/* PAGAMENTO */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Pagamento</h2>
 
-                  {/* METODI */}
                   <div className="mb-4 p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-semibold text-gray-700">Metodi accettati:</span>
@@ -1355,7 +1225,6 @@ function CheckoutInner({
                     </div>
                   </div>
 
-                  {/* SICUREZZA */}
                   <div className="mb-4 flex items-center justify-center gap-4 text-xs text-gray-600 bg-blue-50 py-2.5 px-3 rounded-xl border border-blue-100">
                     <div className="flex items-center gap-1.5">
                       <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
@@ -1418,7 +1287,6 @@ function CheckoutInner({
                     </div>
                   )}
 
-                  {/* ✅ BLOCCO PAGAMENTO CON REDIRECT */}
                   {isFormValid() && !isCalculatingShipping ? (
                     <ObliqpayRedirect
                       sessionId={sessionId}
@@ -1472,7 +1340,6 @@ function CheckoutInner({
               </form>
             </div>
 
-            {/* Desktop Summary Sidebar */}
             <div className="hidden lg:block">
               <div className="sticky top-24">
                 <div className="shopify-section">
@@ -1541,7 +1408,6 @@ function CheckoutInner({
   )
 }
 
-// Page wrapper
 function CheckoutPageContent() {
   const searchParams = useSearchParams()
   const sessionId = searchParams.get("sessionId") || ""
