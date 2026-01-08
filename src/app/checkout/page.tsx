@@ -225,10 +225,10 @@ function CheckoutInner({
     return raw > 0 ? raw : 0
   }, [subtotalCents, cart.totalCents])
 
-  const totalToPayCents = subtotalCents - discountCents + 590
+  const totalToPayCents = subtotalCents - discountCents + shippingCents
 
-  const firstName = customer.fullName.split(" ")[0] || ""
-  const lastName = customer.fullName.split(" ").slice(1).join(" ") || ""
+const firstName = customer.fullName.split(" ")[0] || ""
+const lastName = customer.fullName.split(" ").slice(1).join(" ") || ""
 
   const billingFirstName = billingAddress.fullName.split(" ")[0] || ""
   const billingLastName = billingAddress.fullName.split(" ").slice(1).join(" ") || ""
@@ -494,6 +494,12 @@ function CheckoutInner({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
   }
+// ✅ AGGIUNGI QUI IL DEBUG (prima del return)
+console.log('📊 DEBUG Calcoli:')
+console.log('Subtotale:', subtotalCents / 100)
+console.log('Sconto:', discountCents / 100)
+console.log('Spedizione calcolata:', shippingCents / 100)
+console.log('Totale:', totalToPayCents / 100)
 
   return (
     <>
