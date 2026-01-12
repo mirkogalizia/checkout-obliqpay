@@ -38,8 +38,8 @@ function formatMoney(cents: number, currency: string) {
   }).format(amount)
 }
 
-// ✅ MODIFICATO: Redirect invece di iframe
-function ObliqpayRedirect({
+// ✅ IFRAME VERSION
+function ObliqpayIframe({
   sessionId,
   amountCents,
   currency,
@@ -57,7 +57,7 @@ function ObliqpayRedirect({
   onError: (msg: string) => void
 }) {
   const [loading, setLoading] = useState(false)
-  const [redirecting, setRedirecting] = useState(false)
+  const [checkoutUrl, setCheckoutUrl] = useState("")
   const mountedRef = useRef(true)
 
   useEffect(() => {
@@ -67,9 +67,14 @@ function ObliqpayRedirect({
     }
   }, [])
 
+  useEffect(() => {
+    setCheckoutUrl("")
+    setLoading(false)
+  }, [paymentKey])
+
   const handlePayment = async () => {
-    if (loading || redirecting) return
-    
+    if (loading) return
+
     setLoading(true)
     let alive = true
 
@@ -94,24 +99,26 @@ function ObliqpayRedirect({
       if (!alive || !mountedRef.current) return
 
       onOrderReady({ orderId: json.orderId, checkoutUrl: json.checkoutUrl })
-      
-      setRedirecting(true)
-      console.log("✅ Redirect a:", json.checkoutUrl)
-      
-      setTimeout(() => {
-        window.location.href = json.checkoutUrl
-      }, 500)
+      setCheckoutUrl(json.checkoutUrl)
 
     } catch (e: any) {
       if (!alive || !mountedRef.current) return
       setLoading(false)
       onError(e?.message || "Errore Obliqpay")
+    } finally {
+      if (alive && mountedRef.current) {
+        setLoading(false)
+      }
+    }
+
+    return () => {
+      alive = false
     }
   }
 
   return (
     <div className="border border-gray-300 rounded-xl p-4 bg-white shadow-sm mb-4">
-      {!redirecting ? (
+      {!checkoutUrl ? (
         <button
           onClick={handlePayment}
           disabled={loading}
@@ -135,16 +142,33 @@ function ObliqpayRedirect({
           )}
         </button>
       ) : (
-        <div className="flex items-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-          <div className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent" />
-          <p className="text-sm text-blue-800 font-medium">
-            ✅ Reindirizzamento al pagamento sicuro...
-          </p>
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 p-3 rounded-xl border border-green-200">
+            <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
+              <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <span>✅ Pagamento sicuro attivato</span>
+          </div>
+
+          <iframe
+            src={checkoutUrl}
+            style={{
+              width: "100%",
+              height: "560px",
+              border: "none",
+              borderRadius: "12px",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.1)"
+            }}
+            allow="payment"
+            title="Obliqpay Checkout Sicuro"
+          />
         </div>
       )}
-      
+
       <p className="text-xs text-gray-500 text-center mt-3">
-        🔒 Sarai reindirizzato alla pagina sicura di Obliqpay
+        🔒 Powered by Obliqpay - Pagamento 100% sicuro
       </p>
     </div>
   )
@@ -227,8 +251,8 @@ function CheckoutInner({
 
   const totalToPayCents = subtotalCents - discountCents + shippingCents
 
-const firstName = customer.fullName.split(" ")[0] || ""
-const lastName = customer.fullName.split(" ").slice(1).join(" ") || ""
+  const firstName = customer.fullName.split(" ")[0] || ""
+  const lastName = customer.fullName.split(" ").slice(1).join(" ") || ""
 
   const billingFirstName = billingAddress.fullName.split(" ")[0] || ""
   const billingLastName = billingAddress.fullName.split(" ").slice(1).join(" ") || ""
@@ -494,12 +518,6 @@ const lastName = customer.fullName.split(" ").slice(1).join(" ") || ""
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
   }
-// ✅ AGGIUNGI QUI IL DEBUG (prima del return)
-console.log('📊 DEBUG Calcoli:')
-console.log('Subtotale:', subtotalCents / 100)
-console.log('Sconto:', discountCents / 100)
-console.log('Spedizione calcolata:', shippingCents / 100)
-console.log('Totale:', totalToPayCents / 100)
 
   return (
     <>
@@ -1150,66 +1168,64 @@ console.log('Totale:', totalToPayCents / 100)
                 )}
 
                 {isFormValid() && (
-                  <>
-                    <div className="shopify-section">
-                      <h2 className="shopify-section-title">Metodo di spedizione</h2>
-                      <div className="border border-gray-300 rounded-xl p-4 flex justify-between items-center bg-gradient-to-r from-blue-50 to-indigo-50">
-                        <div>
-                          <p className="text-sm font-semibold text-gray-900">Spedizione BRT Express</p>
-                          <p className="text-xs text-gray-600 mt-1">Consegna in 24/48 ore</p>
-                        </div>
-                        <span className="text-sm font-bold text-gray-900">€5,90</span>
+                  <div className="shopify-section">
+                    <h2 className="shopify-section-title">Metodo di spedizione</h2>
+                    <div className="border border-gray-300 rounded-xl p-4 flex justify-between items-center bg-gradient-to-r from-blue-50 to-indigo-50">
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">Spedizione BRT Express</p>
+                        <p className="text-xs text-gray-600 mt-1">Consegna in 24/48 ore</p>
                       </div>
+                      <span className="text-sm font-bold text-gray-900">€5,90</span>
                     </div>
-
-                    <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 shadow-sm">
-                      <div className="flex items-start gap-4">
-                        <div className="flex -space-x-3">
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-sm">
-                            M
-                          </div>
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-sm">
-                            L
-                          </div>
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-pink-600 border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-sm">
-                            A
-                          </div>
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-sm">
-                            2K+
-                          </div>
-                        </div>
-
-                        <div className="flex-1">
-                          <div className="flex items-center gap-1.5 mb-1">
-                            <span className="text-2xl">🎉</span>
-                            <p className="text-sm font-bold text-gray-900">
-                              Oltre 2.000+ clienti soddisfatti
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-1 mb-1">
-                            {[...Array(5)].map((_, i) => (
-                              <svg key={i} className="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                              </svg>
-                            ))}
-                            <span className="text-xs font-semibold text-gray-700 ml-1">4.9/5</span>
-                            <span className="text-xs text-gray-500">(1.847 recensioni)</span>
-                          </div>
-                          <p className="text-xs text-gray-600">
-                            ✓ Ultima vendita: <strong>3 minuti fa</strong>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </>
+                  </div>
                 )}
+
+                <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 shadow-sm">
+                  <div className="flex items-start gap-4">
+                    <div className="flex -space-x-3">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-sm">
+                        M
+                      </div>
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-purple-600 border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-sm">
+                        L
+                      </div>
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-pink-600 border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-sm">
+                        A
+                      </div>
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 border-2 border-white shadow-md flex items-center justify-center text-white font-bold text-sm">
+                        2K
+                      </div>
+                    </div>
+
+                    <div className="flex-1">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <span className="text-2xl">🎉</span>
+                        <p className="text-sm font-bold text-gray-900">
+                          Oltre 2.000 clienti soddisfatti
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 mb-1">
+                        {[...Array(5)].map((_, i) => (
+                          <svg key={i} className="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
+                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                          </svg>
+                        ))}
+                        <span className="text-xs font-semibold text-gray-700 ml-1">4.9/5</span>
+                        <span className="text-xs text-gray-500">(1.847 recensioni)</span>
+                      </div>
+                      <p className="text-xs text-gray-600">
+                        Ultima vendita <strong>3 minuti fa</strong>
+                      </p>
+                    </div>
+                  </div>
+                </div>
 
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Pagamento</h2>
 
                   <div className="mb-4 p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-semibold text-gray-700">Metodi accettati:</span>
+                      <span className="text-xs font-semibold text-gray-700">Metodi accettati</span>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
                       <div className="h-8 px-3 bg-white border border-gray-300 rounded-lg flex items-center shadow-sm">
@@ -1265,23 +1281,14 @@ console.log('Totale:', totalToPayCents / 100)
                   </div>
 
                   <p className="text-xs text-gray-600 mb-4">
-                    🔒 I tuoi dati non vengono mai memorizzati. Transazione protetta.
+                    I tuoi dati non vengono mai memorizzati. Transazione protetta.
                   </p>
 
                   {isCalculatingShipping && (
                     <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl mb-4">
-                      <svg
-                        className="animate-spin h-4 w-4 text-blue-600"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
+                      <svg className="animate-spin h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path
-                          className="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                       </svg>
                       <p className="text-sm text-blue-800 font-medium">Calcolo in corso...</p>
                     </div>
@@ -1294,17 +1301,19 @@ console.log('Totale:', totalToPayCents / 100)
                   )}
 
                   {isFormValid() && !isCalculatingShipping ? (
-                    <ObliqpayRedirect
+                    <ObliqpayIframe
                       sessionId={sessionId}
                       amountCents={totalToPayCents}
                       currency={currency}
                       customerEmail={customer.email}
-                      paymentKey={paymentKey || "init"}
+                      paymentKey={paymentKey}
                       onOrderReady={({ orderId }) => {
                         setError(null)
                         setObliqpayOrderId(orderId)
                       }}
-                      onError={(msg) => setError(msg)}
+                      onError={(msg) => {
+                        setError(msg)
+                      }}
                     />
                   ) : (
                     <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl">
@@ -1313,22 +1322,22 @@ console.log('Totale:', totalToPayCents / 100)
                       </p>
                     </div>
                   )}
-                </div>
 
-                {error && (
-                  <div className="p-4 bg-red-50 border-2 border-red-200 rounded-xl">
-                    <div className="flex items-start gap-3">
-                      <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      <p className="text-sm text-red-700 font-medium">{error}</p>
+                  {error && (
+                    <div className="p-4 bg-red-50 border-2 border-red-200 rounded-xl">
+                      <div className="flex items-start gap-3">
+                        <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                          <path
+                            fillRule="evenodd"
+                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        <p className="text-sm text-red-700 font-medium">{error}</p>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
 
                 <div className="mt-4 text-center">
                   <p className="text-xs text-gray-500 flex items-center justify-center gap-1.5">
@@ -1341,7 +1350,7 @@ console.log('Totale:', totalToPayCents / 100)
                     </svg>
                     <span>Crittografia SSL a 256-bit</span>
                   </p>
-                  <p className="text-xs text-gray-400 mt-1">Powered by Obliqpay • Secure Checkout</p>
+                  <p className="text-xs text-gray-400 mt-1">Powered by Obliqpay Secure Checkout</p>
                 </div>
               </form>
             </div>
@@ -1416,7 +1425,7 @@ console.log('Totale:', totalToPayCents / 100)
 
 function CheckoutPageContent() {
   const searchParams = useSearchParams()
-  const sessionId = searchParams.get("sessionId") || ""
+  const sessionId = searchParams.get("sessionId")
 
   const [cart, setCart] = useState<CartSessionResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1425,7 +1434,7 @@ function CheckoutPageContent() {
   useEffect(() => {
     async function load() {
       if (!sessionId) {
-        setError("Sessione non valida: manca il sessionId.")
+        setError("Sessione non valida (manca il sessionId).")
         setLoading(false)
         return
       }
@@ -1437,7 +1446,7 @@ function CheckoutPageContent() {
         const res = await fetch(`/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`)
         const data: CartSessionResponse & { error?: string } = await res.json()
 
-        if (!res.ok || (data as any).error) {
+        if (!res.ok || data.error) {
           setError(data.error || "Errore nel recupero del carrello. Riprova dal sito.")
           setLoading(false)
           return
@@ -1460,7 +1469,7 @@ function CheckoutPageContent() {
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
-          <p className="text-sm text-gray-600 font-medium">Caricamento del checkout…</p>
+          <p className="text-sm text-gray-600 font-medium">Caricamento del checkout...</p>
         </div>
       </div>
     )
@@ -1471,7 +1480,7 @@ function CheckoutPageContent() {
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center px-4">
         <div className="max-w-md text-center space-y-4 p-8 bg-white rounded-2xl shadow-lg border border-gray-200">
           <svg className="w-16 h-16 text-red-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
           <h1 className="text-xl font-bold text-gray-900">Impossibile caricare il checkout</h1>
           <p className="text-sm text-gray-600">{error}</p>
@@ -1481,7 +1490,7 @@ function CheckoutPageContent() {
     )
   }
 
-  return <CheckoutInner cart={cart} sessionId={sessionId} />
+  return <CheckoutInner cart={cart} sessionId={sessionId!} />
 }
 
 export default function CheckoutPage() {
@@ -1491,7 +1500,7 @@ export default function CheckoutPage() {
         <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center">
           <div className="text-center">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
-            <p className="text-sm text-gray-600 font-medium">Caricamento…</p>
+            <p className="text-sm text-gray-600 font-medium">Caricamento...</p>
           </div>
         </div>
       }
