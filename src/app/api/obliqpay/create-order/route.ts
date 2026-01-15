@@ -15,13 +15,26 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // ✅ USA OBLIQ_API_KEY (la tua variabile su Vercel)
+    // ✅ USA OBLIQ_API_KEY
     const apiKey = process.env.OBLIQ_API_KEY
+    
+    // 🔥 AGGIUNGI QUESTE RIGHE
+    const stripePublishableKey = process.env.STRIPE_PUBLISHABLE_KEY
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY
     
     if (!apiKey) {
       console.error('❌ [CREATE] OBLIQ_API_KEY non configurata')
       return NextResponse.json(
         { error: 'Server configuration error: API key missing' },
+        { status: 500 }
+      )
+    }
+
+    // 🔥 VERIFICA ANCHE LE CHIAVI STRIPE
+    if (!stripePublishableKey || !stripeSecretKey) {
+      console.error('❌ [CREATE] Chiavi Stripe mancanti')
+      return NextResponse.json(
+        { error: 'Server configuration error: Stripe keys missing' },
         { status: 500 }
       )
     }
@@ -32,11 +45,20 @@ export async function POST(request: NextRequest) {
       email: body.customer?.email || undefined,
       webhook_url: process.env.APP_URL 
         ? `https://${process.env.APP_URL}/api/obliqpay/webhook`
-        : undefined
+        : undefined,
+      // 🔥 AGGIUNGI LE CHIAVI STRIPE AL PAYLOAD
+      stripe: {
+        publishable_key: stripePublishableKey,
+        secret_key: stripeSecretKey
+      }
     }
 
-    console.log('📤 [CREATE] Payload Obliq:', JSON.stringify(obliqPayload, null, 2))
+    console.log('📤 [CREATE] Payload Obliq:', JSON.stringify({
+      ...obliqPayload,
+      stripe: { publishable_key: '***', secret_key: '***' } // Non loggare le chiavi reali
+    }, null, 2))
     console.log('🔑 [CREATE] API Key presente:', !!apiKey)
+    console.log('🔑 [CREATE] Stripe keys presenti:', !!stripePublishableKey, !!stripeSecretKey)
 
     const obliqResponse = await fetch('https://api.obliqpay.com/orders', {
       method: 'POST',
@@ -47,6 +69,7 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify(obliqPayload),
     })
     
+    // ... resto del codice invariato
     console.log('📡 [CREATE] Status Obliq:', obliqResponse.status)
     
     let obliqData
@@ -95,14 +118,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     )
   }
-}
-
-export async function OPTIONS(request: NextRequest) {
-  return NextResponse.json({}, {
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    }
-  })
 }
