@@ -38,7 +38,7 @@ function formatMoney(cents: number, currency: string) {
   }).format(amount)
 }
 
-// ✅ IFRAME OBLIQPAY - CON AUTENTICAZIONE CLIENTSECRET FIXATO
+// ✅ IFRAME OBLIQPAY - VERSIONE DEFINITIVA CON FALLBACK
 function ObliqpayIframe({
   sessionId,
   amountCents,
@@ -60,7 +60,9 @@ function ObliqpayIframe({
   const [checkoutUrl, setCheckoutUrl] = useState("")
   const [orderId, setOrderId] = useState("")
   const [iframeLoaded, setIframeLoaded] = useState(false)
+  const [iframeError, setIframeError] = useState(false)
   const mountedRef = useRef(true)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
 
   useEffect(() => {
     mountedRef.current = true
@@ -73,6 +75,7 @@ function ObliqpayIframe({
     setCheckoutUrl("")
     setOrderId("")
     setIframeLoaded(false)
+    setIframeError(false)
     setLoading(false)
   }, [paymentKey])
 
@@ -109,23 +112,20 @@ function ObliqpayIframe({
       if (!alive || !mountedRef.current) return
 
       console.log("✅ [OBLIQPAY] Ordine creato:", json.orderId)
-      console.log("🔑 [OBLIQPAY] Client Secret ricevuto:", json.clientSecret ? "SÌ" : "NO")
-
-      // 🔥 FIX: Verifica che il clientSecret sia presente
-      if (!json.clientSecret) {
-        throw new Error("clientSecret mancante dalla risposta API")
-      }
+      console.log("🔗 [OBLIQPAY] Checkout URL:", json.checkoutUrl)
 
       setOrderId(json.orderId)
-      
-      // 🔥 FIX: Aggiungi clientSecret come query parameter
-      const authenticatedUrl = `${json.checkoutUrl}?client_secret=${json.clientSecret}`
-      
-      console.log("🔗 [OBLIQPAY] Authenticated URL:", authenticatedUrl)
-      
-      setCheckoutUrl(authenticatedUrl)
+      setCheckoutUrl(json.checkoutUrl)
 
       onOrderReady({ orderId: json.orderId, checkoutUrl: json.checkoutUrl })
+
+      // Timer di fallback: se dopo 10 secondi non si carica, mostra opzione nuova finestra
+      setTimeout(() => {
+        if (!iframeLoaded && mountedRef.current) {
+          console.warn("⚠️ [OBLIQPAY] Iframe non caricato dopo 10s")
+          setIframeError(true)
+        }
+      }, 10000)
 
     } catch (e: any) {
       console.error("❌ [OBLIQPAY] Errore:", e.message)
@@ -140,6 +140,12 @@ function ObliqpayIframe({
 
     return () => {
       alive = false
+    }
+  }
+
+  const openInNewWindow = () => {
+    if (checkoutUrl) {
+      window.open(checkoutUrl, '_blank', 'width=800,height=900,scrollbars=yes,resizable=yes')
     }
   }
 
@@ -179,11 +185,31 @@ function ObliqpayIframe({
             <span>✅ Pagamento sicuro - Ordine #{orderId.substring(0, 8)}</span>
           </div>
 
-          {!iframeLoaded && (
+          {iframeError && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+              <p className="text-sm text-yellow-800 mb-3">
+                Il form di pagamento potrebbe essere bloccato dal browser. Apri in una nuova finestra:
+              </p>
+              <button
+                onClick={openInNewWindow}
+                className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-all"
+              >
+                🔗 Apri pagamento in nuova finestra
+              </button>
+            </div>
+          )}
+
+          {!iframeLoaded && !iframeError && (
             <div className="flex items-center justify-center py-16 bg-gray-50 rounded-xl border border-gray-200">
               <div className="text-center space-y-3">
                 <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent" />
                 <p className="text-sm text-gray-600 font-medium">Caricamento form di pagamento sicuro...</p>
+                <button
+                  onClick={openInNewWindow}
+                  className="text-xs text-blue-600 hover:text-blue-700 underline mt-2"
+                >
+                  Problemi? Apri in nuova finestra
+                </button>
               </div>
             </div>
           )}
@@ -191,14 +217,16 @@ function ObliqpayIframe({
           <div 
             className="relative overflow-hidden rounded-xl" 
             style={{ 
+              display: iframeError ? 'none' : 'block',
               paddingTop: iframeLoaded ? "0" : "75%",
-              height: iframeLoaded ? "600px" : "auto",
+              height: iframeLoaded ? "700px" : "auto",
               transition: "all 0.3s ease",
               boxShadow: "0 4px 20px rgba(0,0,0,0.1)",
               border: "1px solid #e5e7eb"
             }}
           >
             <iframe
+              ref={iframeRef}
               src={checkoutUrl}
               style={{
                 position: iframeLoaded ? "relative" : "absolute",
@@ -211,24 +239,34 @@ function ObliqpayIframe({
                 opacity: iframeLoaded ? 1 : 0,
                 transition: "opacity 0.3s ease"
               }}
-              allow="payment"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation allow-popups-to-escape-sandbox"
+              allow="payment *; accelerometer; autoplay; camera; geolocation; microphone"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation allow-popups-to-escape-sandbox allow-modals"
+              referrerPolicy="origin-when-cross-origin"
               title="Obliqpay Checkout Sicuro"
               onLoad={() => {
                 console.log("✅ [OBLIQPAY] Iframe caricato con successo")
                 setIframeLoaded(true)
+                setIframeError(false)
               }}
               onError={(e) => {
                 console.error("❌ [OBLIQPAY] Errore caricamento iframe:", e)
-                onError("Errore nel caricamento del form di pagamento")
+                setIframeError(true)
               }}
             />
           </div>
 
-          {iframeLoaded && (
-            <p className="text-xs text-gray-500 text-center">
-              Completa il pagamento nel form qui sopra
-            </p>
+          {iframeLoaded && !iframeError && (
+            <div className="space-y-2">
+              <p className="text-xs text-gray-500 text-center">
+                Completa il pagamento nel form qui sopra
+              </p>
+              <button
+                onClick={openInNewWindow}
+                className="w-full py-2 px-4 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-all border border-blue-200"
+              >
+                Preferisci aprire in una nuova finestra? Clicca qui
+              </button>
+            </div>
           )}
         </div>
       )}
