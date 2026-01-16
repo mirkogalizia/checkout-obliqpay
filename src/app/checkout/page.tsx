@@ -38,7 +38,7 @@ function formatMoney(cents: number, currency: string) {
   }).format(amount)
 }
 
-// ✅ IFRAME VERSION FIXATA CON AUTENTICAZIONE
+// ✅ IFRAME OBLIQPAY - VERSIONE DEFINITIVA FIXATA
 function ObliqpayIframe({
   sessionId,
   amountCents,
@@ -59,6 +59,7 @@ function ObliqpayIframe({
   const [loading, setLoading] = useState(false)
   const [checkoutUrl, setCheckoutUrl] = useState("")
   const [orderId, setOrderId] = useState("")
+  const [iframeLoaded, setIframeLoaded] = useState(false)
   const mountedRef = useRef(true)
 
   useEffect(() => {
@@ -71,6 +72,7 @@ function ObliqpayIframe({
   useEffect(() => {
     setCheckoutUrl("")
     setOrderId("")
+    setIframeLoaded(false)
     setLoading(false)
   }, [paymentKey])
 
@@ -81,6 +83,12 @@ function ObliqpayIframe({
     let alive = true
 
     try {
+      console.log("🚀 [OBLIQPAY] Inizializzazione pagamento...", {
+        amount: (amountCents / 100).toFixed(2),
+        currency,
+        email: customerEmail
+      })
+
       const r = await fetch("/api/obliqpay/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -95,20 +103,21 @@ function ObliqpayIframe({
       const json = await r.json().catch(() => ({}))
 
       if (!r.ok || !json?.ok) {
-        throw new Error(json?.error || "Init Obliqpay fallito")
+        throw new Error(json?.error || "Creazione ordine fallita")
       }
 
       if (!alive || !mountedRef.current) return
 
+      console.log("✅ [OBLIQPAY] Ordine creato:", json.orderId)
+      console.log("🔗 [OBLIQPAY] Checkout URL:", json.checkoutUrl)
+
       setOrderId(json.orderId)
-      
-      // 🔥 URL CON AUTENTICAZIONE
-      const authenticatedUrl = `${json.checkoutUrl}?order_id=${json.orderId}`
-      setCheckoutUrl(authenticatedUrl)
+      setCheckoutUrl(json.checkoutUrl)
 
       onOrderReady({ orderId: json.orderId, checkoutUrl: json.checkoutUrl })
 
     } catch (e: any) {
+      console.error("❌ [OBLIQPAY] Errore:", e.message)
       if (!alive || !mountedRef.current) return
       setLoading(false)
       onError(e?.message || "Errore Obliqpay")
@@ -156,21 +165,60 @@ function ObliqpayIframe({
                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
               </svg>
             </div>
-            <span>✅ Pagamento sicuro attivato - Ordine #{orderId.substring(0, 8)}</span>
+            <span>✅ Pagamento sicuro - Ordine #{orderId.substring(0, 8)}</span>
           </div>
 
-          <iframe
-            src={checkoutUrl}
-            style={{
-              width: "100%",
-              height: "560px",
-              border: "none",
-              borderRadius: "12px",
-              boxShadow: "0 4px 20px rgba(0,0,0,0.1)"
+          {!iframeLoaded && (
+            <div className="flex items-center justify-center py-16 bg-gray-50 rounded-xl border border-gray-200">
+              <div className="text-center space-y-3">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent" />
+                <p className="text-sm text-gray-600 font-medium">Caricamento form di pagamento sicuro...</p>
+              </div>
+            </div>
+          )}
+
+          <div 
+            className="relative overflow-hidden rounded-xl" 
+            style={{ 
+              paddingTop: iframeLoaded ? "0" : "75%",
+              height: iframeLoaded ? "600px" : "auto",
+              transition: "all 0.3s ease",
+              boxShadow: "0 4px 20px rgba(0,0,0,0.1)",
+              border: "1px solid #e5e7eb"
             }}
-            allow="payment"
-            title="Obliqpay Checkout Sicuro"
-          />
+          >
+            <iframe
+              src={checkoutUrl}
+              style={{
+                position: iframeLoaded ? "relative" : "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                border: "none",
+                borderRadius: "12px",
+                opacity: iframeLoaded ? 1 : 0,
+                transition: "opacity 0.3s ease"
+              }}
+              allow="payment"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation allow-popups-to-escape-sandbox"
+              title="Obliqpay Checkout Sicuro"
+              onLoad={() => {
+                console.log("✅ [OBLIQPAY] Iframe caricato con successo")
+                setIframeLoaded(true)
+              }}
+              onError={(e) => {
+                console.error("❌ [OBLIQPAY] Errore caricamento iframe:", e)
+                onError("Errore nel caricamento del form di pagamento")
+              }}
+            />
+          </div>
+
+          {iframeLoaded && (
+            <p className="text-xs text-gray-500 text-center">
+              Completa il pagamento nel form qui sopra
+            </p>
+          )}
         </div>
       )}
 
@@ -654,7 +702,6 @@ function CheckoutInner({
       `}</style>
 
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
-        {/* HEADER */}
         <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-gray-200 shadow-sm">
           <div className="max-w-6xl mx-auto px-4 py-4">
             <div className="flex justify-between items-center">
@@ -705,7 +752,6 @@ function CheckoutInner({
           </div>
         </header>
 
-        {/* TRUST BANNER */}
         <div className="max-w-6xl mx-auto px-4 py-6">
           <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 rounded-2xl p-4 md:p-5 border border-blue-100 shadow-sm">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
@@ -773,7 +819,6 @@ function CheckoutInner({
           </div>
         </div>
 
-        {/* MOBILE SUMMARY TOGGLE */}
         <div className="max-w-2xl mx-auto px-4 lg:hidden">
           <div
             className="summary-toggle"
@@ -862,13 +907,10 @@ function CheckoutInner({
           )}
         </div>
 
-        {/* MAIN CONTENT */}
         <div className="max-w-6xl mx-auto px-4 pb-8">
           <div className="lg:grid lg:grid-cols-2 lg:gap-12">
-            {/* LEFT COLUMN - FORM */}
             <div>
               <form onSubmit={handleSubmit} className="space-y-5">
-                {/* CONTATTI */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Contatti</h2>
 
@@ -894,7 +936,6 @@ function CheckoutInner({
                   </div>
                 </div>
 
-                {/* CONSEGNA */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Consegna</h2>
 
@@ -1055,7 +1096,6 @@ function CheckoutInner({
                   </div>
                 </div>
 
-                {/* BILLING */}
                 <div className="flex items-start gap-2 p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
                   <input
                     type="checkbox"
@@ -1172,7 +1212,6 @@ function CheckoutInner({
                   </div>
                 )}
 
-                {/* SPEDIZIONE */}
                 {isFormValid() && (
                   <div className="shopify-section">
                     <h2 className="shopify-section-title">Metodo di spedizione</h2>
@@ -1186,7 +1225,6 @@ function CheckoutInner({
                   </div>
                 )}
 
-                {/* SOCIAL PROOF */}
                 <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 shadow-sm">
                   <div className="flex items-start gap-4">
                     <div className="flex -space-x-3">
@@ -1227,7 +1265,6 @@ function CheckoutInner({
                   </div>
                 </div>
 
-                {/* PAGAMENTO */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Pagamento</h2>
 
@@ -1296,7 +1333,6 @@ function CheckoutInner({
                     </div>
                   )}
 
-                  {/* 🔥 IFRAME OBLIQPAY CON AUTENTICAZIONE */}
                   {isFormValid() && !isCalculatingShipping ? (
                     <ObliqpayIframe
                       sessionId={sessionId}
@@ -1342,7 +1378,6 @@ function CheckoutInner({
               </form>
             </div>
 
-            {/* RIGHT COLUMN - DESKTOP SUMMARY */}
             <div className="hidden lg:block">
               <div className="sticky top-24">
                 <div className="shopify-section">
@@ -1497,4 +1532,5 @@ export default function CheckoutPage() {
     </Suspense>
   )
 }
+
 

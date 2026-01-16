@@ -12,11 +12,12 @@ const nextConfig: NextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://sis-t.redsys.es:25443 https://sis.redsys.es",
-              "frame-src 'self' https://sis-t.redsys.es:25443 https://sis.redsys.es",
-              "connect-src 'self' https://sis-t.redsys.es:25443 https://sis.redsys.es https://*.vercel.app",
+              "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://sis-t.redsys.es:25443 https://sis.redsys.es https://maps.googleapis.com https://v3.obliqpay.com",
+              "frame-src 'self' https://sis-t.redsys.es:25443 https://sis.redsys.es https://v3.obliqpay.com",
+              "connect-src 'self' https://sis-t.redsys.es:25443 https://sis.redsys.es https://*.vercel.app https://api.obliqpay.com https://v3.obliqpay.com https://maps.googleapis.com",
               "img-src 'self' data: https: http:",
-              "style-src 'self' 'unsafe-inline'",
+              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+              "font-src 'self' https://fonts.gstatic.com data:",
             ].join('; '),
           },
         ],
@@ -26,3 +27,4 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
+
