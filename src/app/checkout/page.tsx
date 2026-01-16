@@ -38,7 +38,7 @@ function formatMoney(cents: number, currency: string) {
   }).format(amount)
 }
 
-// ✅ IFRAME VERSION
+// ✅ IFRAME VERSION FIXATA CON AUTENTICAZIONE
 function ObliqpayIframe({
   sessionId,
   amountCents,
@@ -58,6 +58,7 @@ function ObliqpayIframe({
 }) {
   const [loading, setLoading] = useState(false)
   const [checkoutUrl, setCheckoutUrl] = useState("")
+  const [orderId, setOrderId] = useState("")
   const mountedRef = useRef(true)
 
   useEffect(() => {
@@ -69,6 +70,7 @@ function ObliqpayIframe({
 
   useEffect(() => {
     setCheckoutUrl("")
+    setOrderId("")
     setLoading(false)
   }, [paymentKey])
 
@@ -98,8 +100,13 @@ function ObliqpayIframe({
 
       if (!alive || !mountedRef.current) return
 
+      setOrderId(json.orderId)
+      
+      // 🔥 URL CON AUTENTICAZIONE
+      const authenticatedUrl = `${json.checkoutUrl}?order_id=${json.orderId}`
+      setCheckoutUrl(authenticatedUrl)
+
       onOrderReady({ orderId: json.orderId, checkoutUrl: json.checkoutUrl })
-      setCheckoutUrl(json.checkoutUrl)
 
     } catch (e: any) {
       if (!alive || !mountedRef.current) return
@@ -149,7 +156,7 @@ function ObliqpayIframe({
                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
               </svg>
             </div>
-            <span>✅ Pagamento sicuro attivato</span>
+            <span>✅ Pagamento sicuro attivato - Ordine #{orderId.substring(0, 8)}</span>
           </div>
 
           <iframe
@@ -647,6 +654,7 @@ function CheckoutInner({
       `}</style>
 
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+        {/* HEADER */}
         <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-gray-200 shadow-sm">
           <div className="max-w-6xl mx-auto px-4 py-4">
             <div className="flex justify-between items-center">
@@ -697,6 +705,7 @@ function CheckoutInner({
           </div>
         </header>
 
+        {/* TRUST BANNER */}
         <div className="max-w-6xl mx-auto px-4 py-6">
           <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 rounded-2xl p-4 md:p-5 border border-blue-100 shadow-sm">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
@@ -764,6 +773,7 @@ function CheckoutInner({
           </div>
         </div>
 
+        {/* MOBILE SUMMARY TOGGLE */}
         <div className="max-w-2xl mx-auto px-4 lg:hidden">
           <div
             className="summary-toggle"
@@ -852,10 +862,13 @@ function CheckoutInner({
           )}
         </div>
 
+        {/* MAIN CONTENT */}
         <div className="max-w-6xl mx-auto px-4 pb-8">
           <div className="lg:grid lg:grid-cols-2 lg:gap-12">
+            {/* LEFT COLUMN - FORM */}
             <div>
               <form onSubmit={handleSubmit} className="space-y-5">
+                {/* CONTATTI */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Contatti</h2>
 
@@ -881,6 +894,7 @@ function CheckoutInner({
                   </div>
                 </div>
 
+                {/* CONSEGNA */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Consegna</h2>
 
@@ -1041,6 +1055,7 @@ function CheckoutInner({
                   </div>
                 </div>
 
+                {/* BILLING */}
                 <div className="flex items-start gap-2 p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
                   <input
                     type="checkbox"
@@ -1080,12 +1095,7 @@ function CheckoutInner({
                           <input
                             type="text"
                             value={billingFirstName}
-                            onChange={(e) => {
-                              setBillingAddress((prev) => ({
-                                ...prev,
-                                fullName: `${e.target.value} ${billingLastName}`.trim(),
-                              }))
-                            }}
+                            onChange={(e) => setBillingAddress((prev) => ({ ...prev, fullName: `${e.target.value} ${billingLastName}`.trim() }))}
                             className="shopify-input"
                             required
                           />
@@ -1096,12 +1106,7 @@ function CheckoutInner({
                           <input
                             type="text"
                             value={billingLastName}
-                            onChange={(e) => {
-                              setBillingAddress((prev) => ({
-                                ...prev,
-                                fullName: `${billingFirstName} ${e.target.value}`.trim(),
-                              }))
-                            }}
+                            onChange={(e) => setBillingAddress((prev) => ({ ...prev, fullName: `${billingFirstName} ${e.target.value}`.trim() }))}
                             className="shopify-input"
                             required
                           />
@@ -1167,6 +1172,7 @@ function CheckoutInner({
                   </div>
                 )}
 
+                {/* SPEDIZIONE */}
                 {isFormValid() && (
                   <div className="shopify-section">
                     <h2 className="shopify-section-title">Metodo di spedizione</h2>
@@ -1180,6 +1186,7 @@ function CheckoutInner({
                   </div>
                 )}
 
+                {/* SOCIAL PROOF */}
                 <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-4 shadow-sm">
                   <div className="flex items-start gap-4">
                     <div className="flex -space-x-3">
@@ -1199,7 +1206,7 @@ function CheckoutInner({
 
                     <div className="flex-1">
                       <div className="flex items-center gap-1.5 mb-1">
-                        <span className="text-2xl">🎉</span>
+                        <span className="text-2xl">⭐</span>
                         <p className="text-sm font-bold text-gray-900">
                           Oltre 2.000 clienti soddisfatti
                         </p>
@@ -1210,7 +1217,7 @@ function CheckoutInner({
                             <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                           </svg>
                         ))}
-                        <span className="text-xs font-semibold text-gray-700 ml-1">4.9/5</span>
+                        <span className="text-xs font-semibold text-gray-700 ml-1">4.95</span>
                         <span className="text-xs text-gray-500">(1.847 recensioni)</span>
                       </div>
                       <p className="text-xs text-gray-600">
@@ -1220,6 +1227,7 @@ function CheckoutInner({
                   </div>
                 </div>
 
+                {/* PAGAMENTO */}
                 <div className="shopify-section">
                   <h2 className="shopify-section-title">Pagamento</h2>
 
@@ -1250,31 +1258,19 @@ function CheckoutInner({
                   <div className="mb-4 flex items-center justify-center gap-4 text-xs text-gray-600 bg-blue-50 py-2.5 px-3 rounded-xl border border-blue-100">
                     <div className="flex items-center gap-1.5">
                       <svg className="w-4 h-4 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                          clipRule="evenodd"
-                        />
+                        <path fillRule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                       </svg>
                       <span className="font-medium">SSL</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                          clipRule="evenodd"
-                        />
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                       </svg>
                       <span className="font-medium">3D Secure</span>
                     </div>
                     <div className="flex items-center gap-1.5">
                       <svg className="w-4 h-4 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-                          clipRule="evenodd"
-                        />
+                        <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                       </svg>
                       <span className="font-medium">PCI DSS</span>
                     </div>
@@ -1300,6 +1296,7 @@ function CheckoutInner({
                     </div>
                   )}
 
+                  {/* 🔥 IFRAME OBLIQPAY CON AUTENTICAZIONE */}
                   {isFormValid() && !isCalculatingShipping ? (
                     <ObliqpayIframe
                       sessionId={sessionId}
@@ -1311,9 +1308,7 @@ function CheckoutInner({
                         setError(null)
                         setObliqpayOrderId(orderId)
                       }}
-                      onError={(msg) => {
-                        setError(msg)
-                      }}
+                      onError={(msg) => setError(msg)}
                     />
                   ) : (
                     <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl">
@@ -1327,34 +1322,27 @@ function CheckoutInner({
                     <div className="p-4 bg-red-50 border-2 border-red-200 rounded-xl">
                       <div className="flex items-start gap-3">
                         <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                          <path
-                            fillRule="evenodd"
-                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                            clipRule="evenodd"
-                          />
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                         </svg>
                         <p className="text-sm text-red-700 font-medium">{error}</p>
                       </div>
                     </div>
                   )}
-                </div>
 
-                <div className="mt-4 text-center">
-                  <p className="text-xs text-gray-500 flex items-center justify-center gap-1.5">
-                    <svg className="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                      <path
-                        fillRule="evenodd"
-                        d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span>Crittografia SSL a 256-bit</span>
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">Powered by Obliqpay Secure Checkout</p>
+                  <div className="mt-4 text-center">
+                    <p className="text-xs text-gray-500 flex items-center justify-center gap-1.5">
+                      <svg className="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                      </svg>
+                      <span>Crittografia SSL a 256-bit</span>
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">Powered by Obliqpay Secure Checkout</p>
+                  </div>
                 </div>
               </form>
             </div>
 
+            {/* RIGHT COLUMN - DESKTOP SUMMARY */}
             <div className="hidden lg:block">
               <div className="sticky top-24">
                 <div className="shopify-section">
@@ -1444,15 +1432,15 @@ function CheckoutPageContent() {
         setError(null)
 
         const res = await fetch(`/api/cart-session?sessionId=${encodeURIComponent(sessionId)}`)
-        const data: CartSessionResponse & { error?: string } = await res.json()
+        const data = (await res.json()) as CartSessionResponse | { error?: string }
 
-        if (!res.ok || data.error) {
-          setError(data.error || "Errore nel recupero del carrello. Riprova dal sito.")
+        if (!res.ok || (data as any).error) {
+          setError((data as any).error || "Errore nel recupero del carrello. Riprova dal sito.")
           setLoading(false)
           return
         }
 
-        setCart(data)
+        setCart(data as CartSessionResponse)
         setLoading(false)
       } catch (err: any) {
         console.error("Errore checkout:", err)
@@ -1468,8 +1456,8 @@ function CheckoutPageContent() {
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
-          <p className="text-sm text-gray-600 font-medium">Caricamento del checkout...</p>
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4" />
+          <p className="text-sm text-gray-600 font-medium">Caricamento del checkout</p>
         </div>
       </div>
     )
@@ -1499,8 +1487,8 @@ export default function CheckoutPage() {
       fallback={
         <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center">
           <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
-            <p className="text-sm text-gray-600 font-medium">Caricamento...</p>
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4" />
+            <p className="text-sm text-gray-600 font-medium">Caricamento</p>
           </div>
         </div>
       }
@@ -1509,3 +1497,4 @@ export default function CheckoutPage() {
     </Suspense>
   )
 }
+
