@@ -38,7 +38,7 @@ function formatMoney(cents: number, currency: string) {
   }).format(amount)
 }
 
-// ✅ IFRAME OBLIQPAY - VERSIONE DEFINITIVA FIXATA
+// ✅ IFRAME OBLIQPAY - CON AUTENTICAZIONE CLIENTSECRET FIXATO
 function ObliqpayIframe({
   sessionId,
   amountCents,
@@ -109,10 +109,21 @@ function ObliqpayIframe({
       if (!alive || !mountedRef.current) return
 
       console.log("✅ [OBLIQPAY] Ordine creato:", json.orderId)
-      console.log("🔗 [OBLIQPAY] Checkout URL:", json.checkoutUrl)
+      console.log("🔑 [OBLIQPAY] Client Secret ricevuto:", json.clientSecret ? "SÌ" : "NO")
+
+      // 🔥 FIX: Verifica che il clientSecret sia presente
+      if (!json.clientSecret) {
+        throw new Error("clientSecret mancante dalla risposta API")
+      }
 
       setOrderId(json.orderId)
-      setCheckoutUrl(json.checkoutUrl)
+      
+      // 🔥 FIX: Aggiungi clientSecret come query parameter
+      const authenticatedUrl = `${json.checkoutUrl}?client_secret=${json.clientSecret}`
+      
+      console.log("🔗 [OBLIQPAY] Authenticated URL:", authenticatedUrl)
+      
+      setCheckoutUrl(authenticatedUrl)
 
       onOrderReady({ orderId: json.orderId, checkoutUrl: json.checkoutUrl })
 

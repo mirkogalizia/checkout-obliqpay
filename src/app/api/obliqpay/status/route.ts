@@ -1,87 +1,93 @@
-// src/app/api/obliqpay/status/route.ts
 import { NextRequest, NextResponse } from "next/server"
 
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url)
-    const orderId = searchParams.get("orderId")
+    const body = await req.json().catch(() => ({}))
+    const { sessionId, amount, currency, customer } = body
 
-    console.log('🔍 [STATUS] Checking orderId:', orderId)
+    console.log("📦 [CREATE-ORDER] Request:", { sessionId, amount, currency, customer })
 
-    if (!orderId) {
-      console.error('❌ [STATUS] Missing orderId')
+    if (!sessionId || !amount || !currency || !customer?.email) {
       return NextResponse.json(
-        { ok: false, error: "Missing orderId" }, 
+        { ok: false, error: "Parametri mancanti" },
         { status: 400 }
       )
     }
 
-    // ✅ USA OBLIQ_API_KEY (la tua variabile su Vercel)
     const apiKey = process.env.OBLIQ_API_KEY
-    const base = "https://api.obliqpay.com"
-    
     if (!apiKey) {
-      console.error('❌ [STATUS] OBLIQ_API_KEY non configurata')
+      console.error("❌ [CREATE-ORDER] OBLIQ_API_KEY non configurata")
       return NextResponse.json(
-        { ok: false, error: "Server configuration error" }, 
+        { ok: false, error: "Server configuration error" },
         { status: 500 }
       )
     }
 
-    console.log('📡 [STATUS] Calling:', `${base}/orders/${orderId}`)
-    console.log('🔑 [STATUS] API Key presente:', !!apiKey)
-
-    const r = await fetch(`${base}/orders/${orderId}`, {
-      method: 'GET',
-      headers: { 
-        'Authorization': `Bearer ${apiKey}`,
-        'Accept': 'application/json',
+    const orderPayload = {
+      amount: parseFloat(amount),
+      currency: currency.toLowerCase(),
+      customer: {
+        email: customer.email,
       },
+      metadata: {
+        sessionId: sessionId,
+        source: "checkout",
+      },
+    }
+
+    console.log("🚀 [CREATE-ORDER] Calling Obliqpay API...")
+
+    const response = await fetch("https://api.obliqpay.com/orders", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(orderPayload),
     })
 
-    console.log('📡 [STATUS] Response status:', r.status)
+    const data = await response.json().catch(() => ({}))
 
-    let json
-    try {
-      json = await r.json()
-    } catch (e) {
-      const text = await r.text()
-      console.error('❌ [STATUS] Non-JSON response:', text.substring(0, 200))
+    console.log("📡 [CREATE-ORDER] Response status:", response.status)
+    console.log("📥 [CREATE-ORDER] Response data:", JSON.stringify(data, null, 2))
+
+    if (!response.ok) {
+      console.error("❌ [CREATE-ORDER] API Error:", data)
       return NextResponse.json(
-        { ok: false, error: "Invalid response format" }, 
-        { status: 502 }
+        { ok: false, error: data?.message || "Errore creazione ordine" },
+        { status: response.status }
       )
     }
 
-    console.log('📥 [STATUS] Response:', JSON.stringify(json, null, 2))
+    // 🔥 QUESTO È IL FIX: Restituisci anche il clientSecret!
+    const orderId = data.id || data.orderId
+    const clientSecret = data.clientSecret || data.client_secret
+    const checkoutUrl = data.checkoutUrl || `https://v3.obliqpay.com/checkout/${orderId}`
 
-    if (!r.ok) {
-      console.error('❌ [STATUS] API error:', json)
+    if (!clientSecret) {
+      console.error("❌ [CREATE-ORDER] clientSecret mancante nella risposta!")
       return NextResponse.json(
-        { ok: false, error: "Status failed", raw: json }, 
-        { status: r.status }
+        { ok: false, error: "clientSecret mancante" },
+        { status: 500 }
       )
     }
 
-    console.log('✅ [STATUS] Success')
-    return NextResponse.json({ ok: true, order: json })
+    console.log("✅ [CREATE-ORDER] Ordine creato con successo:", orderId)
+    console.log("🔑 [CREATE-ORDER] Client Secret:", clientSecret.substring(0, 20) + "...")
+
+    return NextResponse.json({
+      ok: true,
+      orderId: orderId,
+      clientSecret: clientSecret,
+      checkoutUrl: checkoutUrl,
+    })
 
   } catch (error: any) {
-    console.error('💥 [STATUS] Unhandled error:', error.message)
+    console.error("💥 [CREATE-ORDER] Exception:", error.message)
     return NextResponse.json(
-      { ok: false, error: "Internal server error", message: error.message }, 
+      { ok: false, error: error.message || "Internal error" },
       { status: 500 }
     )
   }
-}
-
-export async function OPTIONS(req: NextRequest) {
-  return NextResponse.json({}, {
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    }
-  })
 }
 
