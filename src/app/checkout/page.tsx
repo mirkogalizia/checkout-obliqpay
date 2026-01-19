@@ -38,12 +38,16 @@ function formatMoney(cents: number, currency: string) {
   }).format(amount)
 }
 
-// ✅ IFRAME OBLIQPAY - VERSIONE DEFINITIVA SENZA SANDBOX
+// ✅ IFRAME OBLIQPAY CON PREFILL COMPLETO
 function ObliqpayIframe({
   sessionId,
   amountCents,
   currency,
   customerEmail,
+  customerFullName,
+  customerPhone,
+  billingAddress,
+  shippingAddress,
   paymentKey,
   onOrderReady,
   onError,
@@ -52,6 +56,24 @@ function ObliqpayIframe({
   amountCents: number
   currency: string
   customerEmail: string
+  customerFullName: string
+  customerPhone: string
+  billingAddress: {
+    line1: string
+    line2?: string
+    city: string
+    state: string
+    postal_code: string
+    country: string
+  }
+  shippingAddress: {
+    line1: string
+    line2?: string
+    city: string
+    state: string
+    postal_code: string
+    country: string
+  }
   paymentKey: string
   onOrderReady: (data: { orderId: string; checkoutUrl: string }) => void
   onError: (msg: string) => void
@@ -77,10 +99,12 @@ function ObliqpayIframe({
     setLoading(true)
 
     try {
-      console.log("🚀 [OBLIQPAY] Inizializzazione pagamento...", {
+      console.log("🚀 [OBLIQPAY] Inizializzazione pagamento con dati completi...", {
         amount: (amountCents / 100).toFixed(2),
         currency,
-        email: customerEmail
+        email: customerEmail,
+        name: customerFullName,
+        phone: customerPhone,
       })
 
       const r = await fetch("/api/obliqpay/create-order", {
@@ -90,7 +114,13 @@ function ObliqpayIframe({
           sessionId,
           amount: (amountCents / 100).toFixed(2),
           currency: currency.toUpperCase(),
-          customer: { email: customerEmail },
+          customer: {
+            email: customerEmail,
+            name: customerFullName,
+            phone: customerPhone,
+            billing_address: billingAddress,
+            shipping_address: shippingAddress,
+          },
         }),
       })
 
@@ -100,7 +130,7 @@ function ObliqpayIframe({
         throw new Error(json?.error || "Creazione ordine fallita")
       }
 
-      console.log("✅ [OBLIQPAY] Ordine creato:", json.orderId)
+      console.log("✅ [OBLIQPAY] Ordine creato con prefill:", json.orderId)
       console.log("🔗 [OBLIQPAY] Checkout URL:", json.checkoutUrl)
 
       setOrderId(json.orderId)
@@ -108,7 +138,6 @@ function ObliqpayIframe({
 
       onOrderReady({ orderId: json.orderId, checkoutUrl: json.checkoutUrl })
 
-      // Mostra opzione nuova finestra dopo 8 secondi se l'iframe non si carica
       setTimeout(() => {
         if (!iframeLoaded) {
           console.warn("⚠️ [OBLIQPAY] Iframe lento, mostro opzione nuova finestra")
@@ -193,7 +222,6 @@ function ObliqpayIframe({
               border: "1px solid #e5e7eb"
             }}
           >
-            {/* 🔥 IFRAME CORRETTO: SENZA SANDBOX, SOLO allow="payment" */}
             <iframe
               ref={iframeRef}
               src={checkoutUrl}
@@ -1119,6 +1147,24 @@ function CheckoutInner({
                       amountCents={totalToPayCents}
                       currency={currency}
                       customerEmail={customer.email}
+                      customerFullName={customer.fullName}
+                      customerPhone={customer.phone}
+                      billingAddress={{
+                        line1: useDifferentBilling ? billingAddress.address1 : customer.address1,
+                        line2: useDifferentBilling ? billingAddress.address2 : customer.address2,
+                        city: useDifferentBilling ? billingAddress.city : customer.city,
+                        state: useDifferentBilling ? billingAddress.province : customer.province,
+                        postal_code: useDifferentBilling ? billingAddress.postalCode : customer.postalCode,
+                        country: useDifferentBilling ? billingAddress.countryCode : customer.countryCode,
+                      }}
+                      shippingAddress={{
+                        line1: customer.address1,
+                        line2: customer.address2,
+                        city: customer.city,
+                        state: customer.province,
+                        postal_code: customer.postalCode,
+                        country: customer.countryCode,
+                      }}
                       paymentKey={paymentKey}
                       onOrderReady={({ orderId }) => {
                         setError(null)
