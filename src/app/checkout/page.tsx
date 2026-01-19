@@ -275,11 +275,6 @@ function CheckoutInner({
   cart: CartSessionResponse
   sessionId: string
 }) {
-  const cartUrl = useMemo(() => {
-    if (cart.shopDomain) return `https://${cart.shopDomain}/cart`
-    return "https://notforresale.it/cart"
-  }, [cart.shopDomain])
-
   const [customer, setCustomer] = useState<CustomerForm>({
     fullName: "",
     email: "",
@@ -741,17 +736,26 @@ function CheckoutInner({
       `}</style>
 
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+        {/* 🔥 HEADER CON LOGO UNIVERSALE */}
         <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-gray-200 shadow-sm">
           <div className="max-w-6xl mx-auto px-4 py-4">
             <div className="flex justify-between items-center">
-              <a href={cartUrl} className="flex items-center gap-2">
-                <img
-                  src="https://cdn.shopify.com/s/files/1/0899/2188/0330/files/logo_checkify_d8a640c7-98fe-4943-85c6-5d1a633416cf.png?v=1761832152"
-                  alt="Logo"
-                  className="h-10"
-                  style={{ maxWidth: "160px" }}
-                />
-              </a>
+              {/* 🔥 LOGO UNIVERSALE "SECURE CHECKOUT" */}
+              <div className="flex items-center gap-2">
+                <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center shadow-lg">
+                  <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path
+                      fillRule="evenodd"
+                      d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-lg font-bold text-gray-900 leading-tight">Secure Checkout</p>
+                  <p className="text-xs text-gray-500 leading-tight">Pagamento SSL 256-bit</p>
+                </div>
+              </div>
 
               <div className="hidden md:flex items-center gap-6">
                 <div className="flex items-center gap-2 text-xs text-gray-600">
@@ -762,7 +766,7 @@ function CheckoutInner({
                       clipRule="evenodd"
                     />
                   </svg>
-                  <span className="font-medium">SSL Sicuro</span>
+                  <span className="font-medium">Certificato SSL</span>
                 </div>
 
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 rounded-full border border-emerald-200">
@@ -773,7 +777,7 @@ function CheckoutInner({
                       clipRule="evenodd"
                     />
                   </svg>
-                  <span className="text-xs font-semibold text-emerald-700">Pagamento Protetto</span>
+                  <span className="text-xs font-semibold text-emerald-700">100% Sicuro</span>
                 </div>
               </div>
 
@@ -1348,5 +1352,4 @@ export default function CheckoutPage() {
     </Suspense>
   )
 }
-
 
