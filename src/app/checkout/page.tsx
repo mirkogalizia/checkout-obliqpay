@@ -38,7 +38,7 @@ function formatMoney(cents: number, currency: string) {
   }).format(amount)
 }
 
-// ✅ IFRAME OBLIQPAY CON PREFILL COMPLETO
+// ✅ IFRAME OBLIQPAY CON AUTO-LOAD
 function ObliqpayIframe({
   sessionId,
   amountCents,
@@ -51,6 +51,7 @@ function ObliqpayIframe({
   paymentKey,
   onOrderReady,
   onError,
+  autoLoad = false, // 🔥 NUOVO: auto-carica iframe
 }: {
   sessionId: string
   amountCents: number
@@ -77,6 +78,7 @@ function ObliqpayIframe({
   paymentKey: string
   onOrderReady: (data: { orderId: string; checkoutUrl: string }) => void
   onError: (msg: string) => void
+  autoLoad?: boolean // 🔥 NUOVO
 }) {
   const [loading, setLoading] = useState(false)
   const [checkoutUrl, setCheckoutUrl] = useState("")
@@ -84,6 +86,7 @@ function ObliqpayIframe({
   const [iframeLoaded, setIframeLoaded] = useState(false)
   const [showNewWindowOption, setShowNewWindowOption] = useState(false)
   const iframeRef = useRef<HTMLIFrameElement>(null)
+  const hasAutoLoaded = useRef(false) // 🔥 NUOVO: previene chiamate multiple
 
   useEffect(() => {
     setCheckoutUrl("")
@@ -91,7 +94,16 @@ function ObliqpayIframe({
     setIframeLoaded(false)
     setShowNewWindowOption(false)
     setLoading(false)
+    hasAutoLoaded.current = false
   }, [paymentKey])
+
+  // 🔥 NUOVO: Auto-load quando il form è completo
+  useEffect(() => {
+    if (autoLoad && !hasAutoLoaded.current && !loading && !checkoutUrl) {
+      hasAutoLoaded.current = true
+      handlePayment()
+    }
+  }, [autoLoad])
 
   const handlePayment = async () => {
     if (loading) return
@@ -160,41 +172,21 @@ function ObliqpayIframe({
     }
   }
 
-  return (
-    <div className="border border-gray-300 rounded-xl p-4 bg-white shadow-sm mb-4">
-      {!checkoutUrl ? (
-        <button
-          onClick={handlePayment}
-          disabled={loading}
-          className="w-full py-4 px-6 text-white font-semibold rounded-xl transition-all"
-          style={{
-            background: loading 
-              ? "#d1d5db" 
-              : "linear-gradient(135deg, #2C6ECB 0%, #1f5bb8 100%)",
-            cursor: loading ? "not-allowed" : "pointer",
-          }}
-        >
-          {loading ? (
-            <span className="flex items-center justify-center gap-2">
-              <div className="inline-block animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
-              Inizializzazione pagamento...
-            </span>
-          ) : (
-            <span className="flex items-center justify-center gap-2">
-              🔒 Paga in maniera sicura
-            </span>
-          )}
-        </button>
-      ) : (
+  // 🔥 MODIFICATO: Mostra solo loader e iframe, nessun pulsante
+  if (loading || checkoutUrl) {
+    return (
+      <div className="border border-gray-300 rounded-xl p-4 bg-white shadow-sm mb-4">
         <div className="space-y-3">
-          <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 p-3 rounded-xl border border-green-200">
-            <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
-              <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-              </svg>
+          {orderId && (
+            <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 p-3 rounded-xl border border-green-200">
+              <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center">
+                <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <span>✅ Pagamento sicuro - Ordine #{orderId.substring(0, 8)}</span>
             </div>
-            <span>✅ Pagamento sicuro - Ordine #{orderId.substring(0, 8)}</span>
-          </div>
+          )}
 
           {!iframeLoaded && (
             <div className="flex items-center justify-center py-16 bg-gray-50 rounded-xl border border-gray-200">
@@ -213,37 +205,39 @@ function ObliqpayIframe({
             </div>
           )}
 
-          <div 
-            className="relative overflow-hidden rounded-xl" 
-            style={{ 
-              display: iframeLoaded ? "block" : "none",
-              height: "700px",
-              boxShadow: "0 4px 20px rgba(0,0,0,0.1)",
-              border: "1px solid #e5e7eb"
-            }}
-          >
-            <iframe
-              ref={iframeRef}
-              src={checkoutUrl}
-              style={{
-                width: "100%",
-                height: "100%",
-                border: "none",
-                borderRadius: "12px",
+          {checkoutUrl && (
+            <div 
+              className="relative overflow-hidden rounded-xl" 
+              style={{ 
+                display: iframeLoaded ? "block" : "none",
+                height: "700px",
+                boxShadow: "0 4px 20px rgba(0,0,0,0.1)",
+                border: "1px solid #e5e7eb"
               }}
-              allow="payment"
-              title="Obliqpay Checkout Sicuro"
-              onLoad={() => {
-                console.log("✅ [OBLIQPAY] Iframe caricato con successo")
-                setIframeLoaded(true)
-                setShowNewWindowOption(false)
-              }}
-              onError={(e) => {
-                console.error("❌ [OBLIQPAY] Errore caricamento iframe:", e)
-                setShowNewWindowOption(true)
-              }}
-            />
-          </div>
+            >
+              <iframe
+                ref={iframeRef}
+                src={checkoutUrl}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  border: "none",
+                  borderRadius: "12px",
+                }}
+                allow="payment"
+                title="Obliqpay Checkout Sicuro"
+                onLoad={() => {
+                  console.log("✅ [OBLIQPAY] Iframe caricato con successo")
+                  setIframeLoaded(true)
+                  setShowNewWindowOption(false)
+                }}
+                onError={(e) => {
+                  console.error("❌ [OBLIQPAY] Errore caricamento iframe:", e)
+                  setShowNewWindowOption(true)
+                }}
+              />
+            </div>
+          )}
 
           {iframeLoaded && (
             <div className="space-y-2">
@@ -259,7 +253,32 @@ function ObliqpayIframe({
             </div>
           )}
         </div>
-      )}
+
+        <p className="text-xs text-gray-500 text-center mt-3">
+          🔒 Powered by Obliqpay - Pagamento 100% sicuro
+        </p>
+      </div>
+    )
+  }
+
+  // 🔥 FALLBACK: Se non auto-load, mostra pulsante
+  return (
+    <div className="border border-gray-300 rounded-xl p-4 bg-white shadow-sm mb-4">
+      <button
+        onClick={handlePayment}
+        disabled={loading}
+        className="w-full py-4 px-6 text-white font-semibold rounded-xl transition-all"
+        style={{
+          background: loading 
+            ? "#d1d5db" 
+            : "linear-gradient(135deg, #2C6ECB 0%, #1f5bb8 100%)",
+          cursor: loading ? "not-allowed" : "pointer",
+        }}
+      >
+        <span className="flex items-center justify-center gap-2">
+          🔒 Paga in maniera sicura
+        </span>
+      </button>
 
       <p className="text-xs text-gray-500 text-center mt-3">
         🔒 Powered by Obliqpay - Pagamento 100% sicuro
@@ -736,11 +755,9 @@ function CheckoutInner({
       `}</style>
 
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
-        {/* 🔥 HEADER CON LOGO UNIVERSALE */}
         <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-gray-200 shadow-sm">
           <div className="max-w-6xl mx-auto px-4 py-4">
             <div className="flex justify-between items-center">
-              {/* 🔥 LOGO UNIVERSALE "SECURE CHECKOUT" */}
               <div className="flex items-center gap-2">
                 <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center shadow-lg">
                   <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
@@ -1170,6 +1187,7 @@ function CheckoutInner({
                         country: customer.countryCode,
                       }}
                       paymentKey={paymentKey}
+                      autoLoad={true} // 🔥 ATTIVA AUTO-LOAD
                       onOrderReady={({ orderId }) => {
                         setError(null)
                         setObliqpayOrderId(orderId)
